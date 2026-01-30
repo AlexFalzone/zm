@@ -278,11 +278,76 @@ func (f *FTPConnection) SubmitJCL(jcl []byte) (string, error) {
 }
 
 func (f *FTPConnection) GetJobStatus(jobid string) (*JobStatus, error) {
-	return nil, fmt.Errorf("not implemented")
+	jobs, err := f.ListJobs("")
+	if err != nil {
+		return nil, err
+	}
+
+	for _, job := range jobs {
+		if job.JobID == jobid {
+			return &job, nil
+		}
+	}
+
+	return nil, fmt.Errorf("job %s not found", jobid)
+}
+
+func (f *FTPConnection) ListJobs(owner string) ([]JobStatus, error) {
+	jes, err := newJESClient(f.host, f.port, f.user, f.password)
+	if err != nil {
+		return nil, err
+	}
+	defer jes.close()
+
+	if owner == "" {
+		owner = f.user
+	}
+	if err := jes.setOwner(owner); err != nil {
+		return nil, err
+	}
+
+	return jes.listJobs()
+}
+
+func parseJobLine(line string) JobStatus {
+	// Format: JOBNAME  JOBID    OWNER    STATUS CLASS
+	// Example: MYJOB    JOB12345 FALZONE  OUTPUT A    RC=0000
+	fields := strings.Fields(line)
+	if len(fields) < 4 {
+		return JobStatus{}
+	}
+
+	job := JobStatus{
+		JobName: fields[0],
+		JobID:   fields[1],
+		Owner:   fields[2],
+		Status:  fields[3],
+	}
+
+	if len(fields) >= 5 {
+		job.Class = fields[4]
+	}
+
+	// Look for return code
+	for _, f := range fields {
+		if strings.HasPrefix(f, "RC=") {
+			job.RetCode = "CC " + strings.TrimPrefix(f, "RC=")
+		} else if strings.HasPrefix(f, "ABEND=") {
+			job.RetCode = "ABEND " + strings.TrimPrefix(f, "ABEND=")
+		}
+	}
+
+	return job
 }
 
 func (f *FTPConnection) GetJobOutput(jobid string) ([]byte, error) {
-	return nil, fmt.Errorf("not implemented")
+	jes, err := newJESClient(f.host, f.port, f.user, f.password)
+	if err != nil {
+		return nil, err
+	}
+	defer jes.close()
+
+	return jes.getJobOutput(jobid)
 }
 
 var _ Connection = (*FTPConnection)(nil)

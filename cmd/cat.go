@@ -74,7 +74,7 @@ func parseDSN(dsn string) (dataset, member string, err error) {
 		}
 	}
 
-	if start == -1 || end == -1 || end <= start {
+	if start == -1 || end == -1 || end <= start+1 {
 		return "", "", fmt.Errorf("invalid dataset format: %s (expected DATASET(MEMBER))", dsn)
 	}
 
