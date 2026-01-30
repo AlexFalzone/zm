@@ -1,6 +1,6 @@
 # zm
 
-CLI tool for interacting with z/OS mainframes via FTP. Lightweight alternative to Zowe.
+CLI tool for interacting with z/OS mainframes via FTP (at least for now). Lightweight alternative to Zowe.
 
 ## Installation
 
