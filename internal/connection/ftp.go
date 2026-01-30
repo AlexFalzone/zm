@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,56 +80,151 @@ func (f *FTPConnection) ListDatasets(pattern string) ([]string, error) {
 	return datasets, nil
 }
 
-func (f *FTPConnection) ListMembers(dataset string) ([]string, error) {
+func (f *FTPConnection) ListMembers(dataset string) ([]Member, error) {
 	if f.conn == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
-	// z/OS FTP: cd to PDS and list members
 	dsn := strings.Trim(dataset, "'")
-	if err := f.conn.ChangeDir(fmt.Sprintf("'%s'", dsn)); err != nil {
+
+	// Create a new connection with debug output to capture LIST response
+	addr := fmt.Sprintf("%s:%d", f.host, f.port)
+	var debugBuf bytes.Buffer
+	conn, err := ftp.Dial(addr, ftp.DialWithTimeout(ftpTimeout), ftp.DialWithDebugOutput(&debugBuf))
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect for LIST: %w", err)
+	}
+	defer conn.Quit()
+
+	if err := conn.Login(f.user, f.password); err != nil {
+		return nil, fmt.Errorf("login failed for LIST: %w", err)
+	}
+
+	// cd to PDS
+	if err := conn.ChangeDir(fmt.Sprintf("'%s'", dsn)); err != nil {
 		return nil, fmt.Errorf("failed to access dataset %s: %w", dsn, err)
 	}
 
-	// Use LIST to get member details, then parse names
-	reader, err := f.conn.Retr("*")
-	if err != nil {
-		// Fallback to NameList
-		entries, err := f.conn.NameList("")
-		if err != nil {
-			return nil, fmt.Errorf("failed to list members: %w", err)
-		}
-		var members []string
-		for _, e := range entries {
-			name := strings.TrimSpace(e)
-			if name != "" {
-				members = append(members, name)
-			}
-		}
-		return members, nil
-	}
-	defer reader.Close()
+	// Call List - it will fail to parse but debug output will have the raw data
+	conn.List("")
 
-	var members []string
-	scanner := bufio.NewScanner(reader)
+	// Parse the debug output to extract member info
+	return f.parseMemberListFromDebug(debugBuf.String())
+}
+
+func (f *FTPConnection) parseMemberListFromDebug(debug string) ([]Member, error) {
+	var members []Member
+	lines := strings.Split(debug, "\n")
+
+	inList := false
+	for _, line := range lines {
+		// Look for lines after "125 List started" until "250 List completed"
+		if strings.Contains(line, "125 List started") {
+			inList = true
+			continue
+		}
+		if strings.Contains(line, "250 List completed") {
+			break
+		}
+		if !inList {
+			continue
+		}
+
+		// Skip header line
+		if strings.Contains(line, "Name") && strings.Contains(line, "VV.MM") {
+			continue
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		member := parseMemberLine(line)
+		if member.Name != "" {
+			members = append(members, member)
+		}
+	}
+
+	return members, nil
+}
+
+func (f *FTPConnection) parseMemberList(r io.Reader) ([]Member, error) {
+	var members []Member
+	scanner := bufio.NewScanner(r)
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		// z/OS LIST output: first field is member name
-		fields := strings.Fields(line)
-		if len(fields) > 0 {
-			name := fields[0]
-			// Skip header line
-			if name != "Name" && !strings.HasPrefix(name, "-") {
-				members = append(members, name)
-			}
+
+		// Skip header line
+		if strings.HasPrefix(line, " Name") || strings.HasPrefix(line, "Name") {
+			continue
+		}
+
+		// Skip empty lines
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		member := parseMemberLine(line)
+		if member.Name != "" {
+			members = append(members, member)
 		}
 	}
-	return members, nil
+
+	return members, scanner.Err()
+}
+
+func parseMemberLine(line string) Member {
+	// Format: Name     VV.MM   Created       Changed      Size  Init   Mod   Id
+	// Example: HSISAPIE  01.82 2024/04/16 2025/12/10 20:18     5    27     0 FALZONE
+	fields := strings.Fields(line)
+	if len(fields) < 8 {
+		return Member{}
+	}
+
+	m := Member{Name: fields[0]}
+
+	// Parse VV.MM
+	if vvmm := strings.Split(fields[1], "."); len(vvmm) == 2 {
+		m.VV, _ = strconv.Atoi(vvmm[0])
+		m.MM, _ = strconv.Atoi(vvmm[1])
+	}
+
+	// Created date
+	m.Created = fields[2]
+
+	// Changed date and time
+	if len(fields) >= 5 {
+		m.Changed = fields[3] + " " + fields[4]
+	}
+
+	// Size, Init, Mod, User
+	if len(fields) >= 6 {
+		m.Size, _ = strconv.Atoi(fields[5])
+	}
+	if len(fields) >= 7 {
+		m.Init, _ = strconv.Atoi(fields[6])
+	}
+	if len(fields) >= 8 {
+		m.Mod, _ = strconv.Atoi(fields[7])
+	}
+	if len(fields) >= 9 {
+		m.User = fields[8]
+	}
+
+	return m
 }
 
 func (f *FTPConnection) ReadMember(dataset, member string) ([]byte, error) {
 	if f.conn == nil {
 		return nil, fmt.Errorf("not connected")
+	}
+
+	// Set ASCII mode for EBCDIC to ASCII conversion
+	if err := f.conn.Type(ftp.TransferTypeASCII); err != nil {
+		return nil, fmt.Errorf("failed to set ASCII mode: %w", err)
 	}
 
 	// z/OS FTP: retrieve 'DATASET(MEMBER)'
@@ -153,6 +249,11 @@ func (f *FTPConnection) WriteMember(dataset, member string, content []byte) erro
 func (f *FTPConnection) ReadFile(path string) ([]byte, error) {
 	if f.conn == nil {
 		return nil, fmt.Errorf("not connected")
+	}
+
+	// Set ASCII mode for EBCDIC to ASCII conversion
+	if err := f.conn.Type(ftp.TransferTypeASCII); err != nil {
+		return nil, fmt.Errorf("failed to set ASCII mode: %w", err)
 	}
 
 	reader, err := f.conn.Retr(path)
