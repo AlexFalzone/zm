@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"text/tabwriter"
 
 	"zm/internal/connection"
 
@@ -51,8 +53,13 @@ func runLs(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tVV.MM\tCHANGED\tSIZE\tUSER")
 	for _, m := range members {
-		fmt.Println(m)
+		fmt.Fprintf(w, "%s\t%02d.%02d\t%s\t%d\t%s\n",
+			m.Name, m.VV, m.MM, m.Changed, m.Size, m.User)
 	}
+	w.Flush()
 	return nil
 }
