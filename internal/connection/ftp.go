@@ -347,6 +347,10 @@ func (f *FTPConnection) GetJobOutput(jobid string) ([]byte, error) {
 	}
 	defer jes.close()
 
+	if err := jes.setOwner(f.user); err != nil {
+		return nil, err
+	}
+
 	return jes.getJobOutput(jobid)
 }
 

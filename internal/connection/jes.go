@@ -56,7 +56,10 @@ func (c *jesClient) close() {
 }
 
 func (c *jesClient) setOwner(owner string) error {
-	return c.cmd("SITE JESOWNER=%s", owner)
+	if err := c.cmd("SITE JESOWNER=%s", owner); err != nil {
+		return err
+	}
+	return c.cmd("SITE JESJOBNAME=*")
 }
 
 func (c *jesClient) listJobs() ([]JobStatus, error) {
@@ -68,6 +71,9 @@ func (c *jesClient) listJobs() ([]JobStatus, error) {
 }
 
 func (c *jesClient) getJobOutput(jobid string) ([]byte, error) {
+	if err := c.cmd("TYPE A"); err != nil {
+		return nil, fmt.Errorf("failed to set ASCII mode: %w", err)
+	}
 	lines, err := c.retrData("RETR", jobid)
 	if err != nil {
 		return nil, err
@@ -93,9 +99,13 @@ func (c *jesClient) retrData(cmd, arg string) ([]string, error) {
 	defer dataConn.Close()
 
 	if arg != "" {
-		c.send("%s %s", cmd, arg)
+		if err := c.send("%s %s", cmd, arg); err != nil {
+			return nil, fmt.Errorf("failed to send %s: %w", cmd, err)
+		}
 	} else {
-		c.send(cmd)
+		if err := c.send(cmd); err != nil {
+			return nil, fmt.Errorf("failed to send %s: %w", cmd, err)
+		}
 	}
 
 	resp, err := c.readResponse()
@@ -112,8 +122,14 @@ func (c *jesClient) retrData(cmd, arg string) ([]string, error) {
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read data: %w", err)
+	}
 
-	c.readResponse()
+	endResp, endErr := c.readResponse()
+	if endErr != nil && len(lines) == 0 {
+		return nil, fmt.Errorf("no output available: %s", endResp)
+	}
 
 	return lines, nil
 }
