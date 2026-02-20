@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"zm/internal/connection"
@@ -64,15 +65,8 @@ func runCat(cmd *cobra.Command, args []string) error {
 func parseDSN(dsn string) (dataset, member string, err error) {
 	dsn = trimQuotes(dsn)
 
-	start := -1
-	end := -1
-	for i, c := range dsn {
-		if c == '(' {
-			start = i
-		} else if c == ')' {
-			end = i
-		}
-	}
+	start := strings.IndexByte(dsn, '(')
+	end := strings.IndexByte(dsn, ')')
 
 	if start == -1 || end == -1 || end <= start+1 {
 		return "", "", fmt.Errorf("invalid dataset format: %s (expected DATASET(MEMBER))", dsn)
