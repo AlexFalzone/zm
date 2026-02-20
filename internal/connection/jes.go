@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -117,7 +118,7 @@ func (c *jesClient) retrData(cmd, arg string) ([]string, error) {
 	}
 
 	dataConn.SetReadDeadline(time.Now().Add(ftpTimeout * 2))
-	var lines []string
+	lines := make([]string, 0, 256)
 	scanner := bufio.NewScanner(dataConn)
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
@@ -188,18 +189,22 @@ func parsePASV(resp string) (string, error) {
 		return "", fmt.Errorf("invalid PASV response: %s", resp)
 	}
 
-	host := fmt.Sprintf("%s.%s.%s.%s", parts[0], parts[1], parts[2], parts[3])
-	p1 := 0
-	p2 := 0
-	fmt.Sscanf(parts[4], "%d", &p1)
-	fmt.Sscanf(parts[5], "%d", &p2)
+	host := strings.Join(parts[:4], ".")
+	p1, err := strconv.Atoi(strings.TrimSpace(parts[4]))
+	if err != nil {
+		return "", fmt.Errorf("invalid PASV port: %s", resp)
+	}
+	p2, err := strconv.Atoi(strings.TrimSpace(parts[5]))
+	if err != nil {
+		return "", fmt.Errorf("invalid PASV port: %s", resp)
+	}
 	port := p1*256 + p2
 
 	return fmt.Sprintf("%s:%d", host, port), nil
 }
 
 func parseJobLines(lines []string) []JobStatus {
-	var jobs []JobStatus
+	jobs := make([]JobStatus, 0, len(lines))
 	for _, line := range lines {
 		if strings.Contains(line, "JOBNAME") && strings.Contains(line, "JOBID") {
 			continue

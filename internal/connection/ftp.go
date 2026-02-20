@@ -20,6 +20,7 @@ type FTPConnection struct {
 	user     string
 	password string
 	conn     *ftp.ServerConn
+	debugBuf bytes.Buffer
 }
 
 func NewFTPConnection(host string, port int, user, password string) *FTPConnection {
@@ -34,7 +35,7 @@ func NewFTPConnection(host string, port int, user, password string) *FTPConnecti
 func (f *FTPConnection) Connect() error {
 	addr := fmt.Sprintf("%s:%d", f.host, f.port)
 
-	conn, err := ftp.Dial(addr, ftp.DialWithTimeout(ftpTimeout))
+	conn, err := ftp.Dial(addr, ftp.DialWithTimeout(ftpTimeout), ftp.DialWithDebugOutput(&f.debugBuf))
 	if err != nil {
 		return fmt.Errorf("failed to connect to %s: %w", addr, err)
 	}
@@ -70,7 +71,7 @@ func (f *FTPConnection) ListDatasets(pattern string) ([]string, error) {
 		return nil, fmt.Errorf("failed to list datasets: %w", err)
 	}
 
-	var datasets []string
+	datasets := make([]string, 0, len(entries))
 	for _, e := range entries {
 		name := strings.TrimSpace(e)
 		if name != "" {
@@ -87,34 +88,24 @@ func (f *FTPConnection) ListMembers(dataset string) ([]Member, error) {
 
 	dsn := strings.Trim(dataset, "'")
 
-	// Create a new connection with debug output to capture LIST response
-	addr := fmt.Sprintf("%s:%d", f.host, f.port)
-	var debugBuf bytes.Buffer
-	conn, err := ftp.Dial(addr, ftp.DialWithTimeout(ftpTimeout), ftp.DialWithDebugOutput(&debugBuf))
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect for LIST: %w", err)
-	}
-	defer conn.Quit()
-
-	if err := conn.Login(f.user, f.password); err != nil {
-		return nil, fmt.Errorf("login failed for LIST: %w", err)
-	}
+	// Reset debug buffer and capture only this LIST operation
+	f.debugBuf.Reset()
 
 	// cd to PDS
-	if err := conn.ChangeDir(fmt.Sprintf("'%s'", dsn)); err != nil {
+	if err := f.conn.ChangeDir(fmt.Sprintf("'%s'", dsn)); err != nil {
 		return nil, fmt.Errorf("failed to access dataset %s: %w", dsn, err)
 	}
 
 	// Call List - it will fail to parse but debug output will have the raw data
-	conn.List("")
+	f.conn.List("")
 
 	// Parse the debug output to extract member info
-	return f.parseMemberListFromDebug(debugBuf.String())
+	return f.parseMemberListFromDebug(f.debugBuf.String())
 }
 
 func (f *FTPConnection) parseMemberListFromDebug(debug string) ([]Member, error) {
-	var members []Member
 	lines := strings.Split(debug, "\n")
+	members := make([]Member, 0, len(lines)/2)
 
 	inList := false
 	for _, line := range lines {
@@ -150,7 +141,7 @@ func (f *FTPConnection) parseMemberListFromDebug(debug string) ([]Member, error)
 }
 
 func (f *FTPConnection) parseMemberList(r io.Reader) ([]Member, error) {
-	var members []Member
+	members := make([]Member, 0, 32)
 	scanner := bufio.NewScanner(r)
 
 	for scanner.Scan() {
