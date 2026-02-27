@@ -38,6 +38,7 @@ type Connection interface {
 
 	// Jobs
 	SubmitJCL(jcl []byte) (string, error) // returns job ID
+	ListJobs(owner string) ([]JobStatus, error)
 	GetJobStatus(jobid string) (*JobStatus, error)
 	GetJobOutput(jobid string) ([]byte, error)
 }

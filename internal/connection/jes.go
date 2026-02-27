@@ -15,7 +15,7 @@ type jesClient struct {
 }
 
 func newJESClient(host string, port int, user, password string) (*jesClient, error) {
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, ftpTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
@@ -57,6 +57,9 @@ func (c *jesClient) close() {
 }
 
 func (c *jesClient) setOwner(owner string) error {
+	if strings.ContainsAny(owner, "\r\n") {
+		return fmt.Errorf("invalid owner: contains control characters")
+	}
 	if err := c.cmd("SITE JESOWNER=%s", owner); err != nil {
 		return err
 	}
@@ -71,7 +74,87 @@ func (c *jesClient) listJobs() ([]JobStatus, error) {
 	return parseJobLines(lines), nil
 }
 
+func (c *jesClient) submitJCL(jcl []byte) (string, error) {
+	if err := c.cmd("TYPE A"); err != nil {
+		return "", fmt.Errorf("failed to set ASCII mode: %w", err)
+	}
+
+	lines, err := c.storData("STOR SUBMIT", jcl)
+	if err != nil {
+		return "", fmt.Errorf("failed to submit JCL: %w", err)
+	}
+
+	// z/OS FTP responds with job ID in the 250 response, e.g.:
+	// "250 It is known to JES as JOB12345"
+	for _, line := range lines {
+		if idx := strings.Index(line, "JOB"); idx != -1 {
+			// Extract JOBxxxxx
+			field := line[idx:]
+			if sp := strings.IndexByte(field, ' '); sp != -1 {
+				field = field[:sp]
+			}
+			return strings.TrimSpace(field), nil
+		}
+	}
+
+	return "", fmt.Errorf("could not parse job ID from submit response")
+}
+
+func (c *jesClient) storData(cmd string, data []byte) ([]string, error) {
+	pasvResp, err := c.cmdResp("PASV")
+	if err != nil {
+		return nil, err
+	}
+
+	dataAddr, err := parsePASV(pasvResp)
+	if err != nil {
+		return nil, err
+	}
+
+	dataConn, err := net.DialTimeout("tcp", dataAddr, ftpTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect data channel: %w", err)
+	}
+
+	if err := c.send(cmd); err != nil {
+		dataConn.Close()
+		return nil, err
+	}
+
+	resp, err := c.readResponse()
+	if err != nil {
+		dataConn.Close()
+		return nil, err
+	}
+	if !strings.HasPrefix(resp, "125") && !strings.HasPrefix(resp, "150") {
+		dataConn.Close()
+		return nil, fmt.Errorf("STOR failed: %s", resp)
+	}
+
+	dataConn.SetWriteDeadline(time.Now().Add(ftpTimeout))
+	_, err = dataConn.Write(data)
+	dataConn.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to send data: %w", err)
+	}
+
+	// Read completion response(s)
+	var responses []string
+	for {
+		endResp, endErr := c.readResponse()
+		responses = append(responses, endResp)
+		if endErr != nil || strings.HasPrefix(endResp, "250") {
+			break
+		}
+	}
+
+	return responses, nil
+}
+
 func (c *jesClient) getJobOutput(jobid string) ([]byte, error) {
+	if strings.ContainsAny(jobid, "\r\n") {
+		return nil, fmt.Errorf("invalid jobid: contains control characters")
+	}
 	if err := c.cmd("TYPE A"); err != nil {
 		return nil, fmt.Errorf("failed to set ASCII mode: %w", err)
 	}

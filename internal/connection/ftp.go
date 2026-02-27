@@ -1,10 +1,10 @@
 package connection
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -33,7 +33,7 @@ func NewFTPConnection(host string, port int, user, password string) *FTPConnecti
 }
 
 func (f *FTPConnection) Connect() error {
-	addr := fmt.Sprintf("%s:%d", f.host, f.port)
+	addr := net.JoinHostPort(f.host, strconv.Itoa(f.port))
 
 	conn, err := ftp.Dial(addr, ftp.DialWithTimeout(ftpTimeout), ftp.DialWithDebugOutput(&f.debugBuf))
 	if err != nil {
@@ -140,33 +140,6 @@ func (f *FTPConnection) parseMemberListFromDebug(debug string) ([]Member, error)
 	return members, nil
 }
 
-func (f *FTPConnection) parseMemberList(r io.Reader) ([]Member, error) {
-	members := make([]Member, 0, 32)
-	scanner := bufio.NewScanner(r)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		// Skip header line
-		if strings.HasPrefix(line, " Name") || strings.HasPrefix(line, "Name") {
-			continue
-		}
-
-		// Skip empty lines
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		member := parseMemberLine(line)
-		if member.Name != "" {
-			members = append(members, member)
-		}
-	}
-
-	return members, scanner.Err()
-}
-
 func parseMemberLine(line string) Member {
 	// Format: Name     VV.MM   Created       Changed      Size  Init   Mod   Id
 	// Example: HSISAPIE  01.82 2024/04/16 2025/12/10 20:18     5    27     0 FALZONE
@@ -234,7 +207,19 @@ func (f *FTPConnection) ReadMember(dataset, member string) ([]byte, error) {
 }
 
 func (f *FTPConnection) WriteMember(dataset, member string, content []byte) error {
-	return fmt.Errorf("not implemented")
+	if f.conn == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	if err := f.conn.Type(ftp.TransferTypeASCII); err != nil {
+		return fmt.Errorf("failed to set ASCII mode: %w", err)
+	}
+
+	dsn := fmt.Sprintf("'%s(%s)'", strings.Trim(dataset, "'"), member)
+	if err := f.conn.Stor(dsn, bytes.NewReader(content)); err != nil {
+		return fmt.Errorf("failed to write %s: %w", dsn, err)
+	}
+	return nil
 }
 
 func (f *FTPConnection) ReadFile(path string) ([]byte, error) {
@@ -261,11 +246,28 @@ func (f *FTPConnection) ReadFile(path string) ([]byte, error) {
 }
 
 func (f *FTPConnection) WriteFile(path string, content []byte) error {
-	return fmt.Errorf("not implemented")
+	if f.conn == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	if err := f.conn.Type(ftp.TransferTypeASCII); err != nil {
+		return fmt.Errorf("failed to set ASCII mode: %w", err)
+	}
+
+	if err := f.conn.Stor(path, bytes.NewReader(content)); err != nil {
+		return fmt.Errorf("failed to write %s: %w", path, err)
+	}
+	return nil
 }
 
 func (f *FTPConnection) SubmitJCL(jcl []byte) (string, error) {
-	return "", fmt.Errorf("not implemented")
+	jes, err := newJESClient(f.host, f.port, f.user, f.password)
+	if err != nil {
+		return "", err
+	}
+	defer jes.close()
+
+	return jes.submitJCL(jcl)
 }
 
 func (f *FTPConnection) GetJobStatus(jobid string) (*JobStatus, error) {

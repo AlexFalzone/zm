@@ -45,13 +45,6 @@ func runConfigSetup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("host is required")
 	}
 
-	// Port
-	portStr := prompt(reader, "Port", "21")
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return fmt.Errorf("invalid port: %s", portStr)
-	}
-
 	// User
 	user := prompt(reader, "Username", "")
 	if user == "" {
@@ -65,9 +58,17 @@ func runConfigSetup(cmd *cobra.Command, args []string) error {
 	}
 
 	// Protocol
-	protocol := prompt(reader, "Protocol (ftp/sftp)", "sftp")
-	if protocol != "ftp" && protocol != "sftp" {
-		return fmt.Errorf("protocol must be 'ftp' or 'sftp'")
+	protocol := prompt(reader, "Protocol (zosmf/ftp)", "zosmf")
+	if protocol != "zosmf" && protocol != "ftp" {
+		return fmt.Errorf("protocol must be 'zosmf' or 'ftp'")
+	}
+
+	// Port (default depends on protocol)
+	defaultPort := strconv.Itoa(config.DefaultPortForProtocol(protocol))
+	portStr := prompt(reader, "Port", defaultPort)
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return fmt.Errorf("invalid port: %s", portStr)
 	}
 
 	// HLQ
@@ -115,9 +116,13 @@ func runConfigSetup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
+	configPath := cfgFile
+	if configPath == "" {
+		configPath = "~/" + config.DefaultConfigFile
+	}
 	fmt.Println()
 	fmt.Println("Configuration saved successfully!")
-	fmt.Printf("Config file: ~/.zmconfig\n")
+	fmt.Printf("Config file: %s\n", configPath)
 	fmt.Printf("Default profile: %s\n", cfg.DefaultProfile)
 
 	return nil

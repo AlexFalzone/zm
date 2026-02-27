@@ -23,14 +23,14 @@ func TestProfileValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid sftp profile",
+			name: "sftp not implemented",
 			profile: Profile{
 				Host:     "mainframe.example.com",
 				User:     "user",
 				Password: "pass",
 				Protocol: "sftp",
 			},
-			wantErr: false,
+			wantErr: true,
 		},
 		{
 			name: "missing host",
@@ -58,6 +58,16 @@ func TestProfileValidate(t *testing.T) {
 				Protocol: "ftp",
 			},
 			wantErr: true,
+		},
+		{
+			name: "valid zosmf profile",
+			profile: Profile{
+				Host:     "mainframe.example.com",
+				User:     "user",
+				Password: "pass",
+				Protocol: "zosmf",
+			},
+			wantErr: false,
 		},
 		{
 			name: "invalid protocol",
@@ -194,10 +204,11 @@ default_profile: test
 	}
 
 	profile, _ := cfg.GetProfile("test")
-	if profile.Port != DefaultPort {
-		t.Errorf("Port = %d, want %d", profile.Port, DefaultPort)
-	}
 	if profile.Protocol != DefaultProtocol {
 		t.Errorf("Protocol = %q, want %q", profile.Protocol, DefaultProtocol)
+	}
+	wantPort := DefaultPortForProtocol(DefaultProtocol)
+	if profile.Port != wantPort {
+		t.Errorf("Port = %d, want %d", profile.Port, wantPort)
 	}
 }

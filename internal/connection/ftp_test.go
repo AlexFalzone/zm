@@ -1,7 +1,6 @@
 package connection
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -60,33 +59,6 @@ func TestParseMemberLine(t *testing.T) {
 				t.Errorf("parseMemberLine(%q) = %+v, want %+v", tt.line, got, tt.expected)
 			}
 		})
-	}
-}
-
-func TestParseMemberList(t *testing.T) {
-	input := ` Name     VV.MM   Created       Changed      Size  Init   Mod   Id
-MEMBER1   01.00 2024/01/01 2024/01/15 09:00    10    10     0 USER1
-MEMBER2   02.05 2023/06/01 2024/02/20 14:30    50    40    10 USER2
-
-`
-	f := &FTPConnection{}
-	members, err := f.parseMemberList(strings.NewReader(input))
-	if err != nil {
-		t.Fatalf("parseMemberList error: %v", err)
-	}
-
-	if len(members) != 2 {
-		t.Fatalf("expected 2 members, got %d", len(members))
-	}
-
-	if members[0].Name != "MEMBER1" {
-		t.Errorf("first member name = %q, want MEMBER1", members[0].Name)
-	}
-	if members[1].Name != "MEMBER2" {
-		t.Errorf("second member name = %q, want MEMBER2", members[1].Name)
-	}
-	if members[1].VV != 2 || members[1].MM != 5 {
-		t.Errorf("second member version = %d.%d, want 2.5", members[1].VV, members[1].MM)
 	}
 }
 

@@ -5,19 +5,14 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"zm/internal/connection"
 )
 
 var catCmd = &cobra.Command{
 	Use:   "cat <dataset(member)>",
 	Short: "Display content of a member or USS file",
-	Long: `Display the content of a PDS member or USS file.
-
-Examples:
-  zm cat 'USERNAME.SOURCE(MYPROG)'   # display PDS member
-  zm cat /u/username/file.txt        # display USS file`,
-	Args: cobra.ExactArgs(1),
-	RunE: runCat,
+	Long:  `Display the content of a PDS member or USS file.`,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runCat,
 }
 
 func init() {
@@ -25,18 +20,16 @@ func init() {
 }
 
 func runCat(cmd *cobra.Command, args []string) error {
-	profile, err := GetCurrentProfile()
+	_, conn, err := openConnection()
 	if err != nil {
-		return err
-	}
-
-	conn := connection.NewFTPConnection(profile.Host, profile.Port, profile.User, profile.Password)
-	if err := conn.Connect(); err != nil {
 		return err
 	}
 	defer conn.Close()
 
 	path := args[0]
+	if path == "" {
+		return fmt.Errorf("path cannot be empty")
+	}
 
 	// USS path starts with /
 	if path[0] == '/' {

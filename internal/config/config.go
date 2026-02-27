@@ -10,8 +10,7 @@ import (
 
 const (
 	DefaultConfigFile = ".zmconfig"
-	DefaultPort       = 21
-	DefaultProtocol   = "ftp"
+	DefaultProtocol   = "zosmf"
 )
 
 type Profile struct {
@@ -19,7 +18,7 @@ type Profile struct {
 	Port     int    `yaml:"port"`
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
-	Protocol string `yaml:"protocol"` // ftp, sftp
+	Protocol string `yaml:"protocol"` // zosmf, ftp
 	HLQ      string `yaml:"hlq"`
 	USSHome  string `yaml:"uss_home"`
 }
@@ -52,11 +51,14 @@ func Load(path string) (*Config, error) {
 	}
 
 	for name, p := range cfg.Profiles {
-		if p.Port == 0 {
-			p.Port = DefaultPort
-		}
 		if p.Protocol == "" {
 			p.Protocol = DefaultProtocol
+		}
+		if p.Port == 0 {
+			p.Port = DefaultPortForProtocol(p.Protocol)
+		}
+		if err := p.Validate(); err != nil {
+			return nil, fmt.Errorf("profile '%s': %w", name, err)
 		}
 		cfg.Profiles[name] = p
 	}
@@ -112,8 +114,17 @@ func (p *Profile) Validate() error {
 	if p.Password == "" {
 		return fmt.Errorf("password is required")
 	}
-	if p.Protocol != "ftp" && p.Protocol != "sftp" {
-		return fmt.Errorf("protocol must be 'ftp' or 'sftp'")
+	if p.Protocol != "zosmf" && p.Protocol != "ftp" {
+		return fmt.Errorf("protocol must be 'zosmf' or 'ftp'")
 	}
 	return nil
+}
+
+func DefaultPortForProtocol(protocol string) int {
+	switch protocol {
+	case "zosmf":
+		return 443
+	default:
+		return 21
+	}
 }

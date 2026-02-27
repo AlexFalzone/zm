@@ -5,20 +5,14 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"zm/internal/connection"
-
 	"github.com/spf13/cobra"
 )
 
 var lsCmd = &cobra.Command{
 	Use:   "ls [dataset]",
 	Short: "List datasets or members",
-	Long: `List datasets matching a pattern, or members of a PDS.
-
-Examples:
-  zm ls                    # list datasets matching HLQ.*
-  zm ls 'USERNAME.SOURCE'   # list members in PDS`,
-	RunE: runLs,
+	Long:  `List datasets matching a pattern, or members of a PDS.`,
+	RunE:  runLs,
 }
 
 func init() {
@@ -26,13 +20,8 @@ func init() {
 }
 
 func runLs(cmd *cobra.Command, args []string) error {
-	profile, err := GetCurrentProfile()
+	profile, conn, err := openConnection()
 	if err != nil {
-		return err
-	}
-
-	conn := connection.NewFTPConnection(profile.Host, profile.Port, profile.User, profile.Password)
-	if err := conn.Connect(); err != nil {
 		return err
 	}
 	defer conn.Close()

@@ -5,8 +5,9 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/spf13/cobra"
 	"zm/internal/connection"
+
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -17,14 +18,8 @@ var (
 var jobsCmd = &cobra.Command{
 	Use:   "jobs [jobid]",
 	Short: "List jobs or show job status/output",
-	Long: `List jobs for current user, or show status/output of a specific job.
-
-Examples:
-  zm jobs                    # list all jobs for current user
-  zm jobs JOB12345           # show status of specific job
-  zm jobs JOB12345 --output  # show job output
-  zm jobs --owner '*'        # list jobs for all users`,
-	RunE: runJobs,
+	Long:  `List jobs for current user, or show status/output of a specific job.`,
+	RunE:  runJobs,
 }
 
 func init() {
@@ -34,13 +29,8 @@ func init() {
 }
 
 func runJobs(cmd *cobra.Command, args []string) error {
-	profile, err := GetCurrentProfile()
+	_, conn, err := openConnection()
 	if err != nil {
-		return err
-	}
-
-	conn := connection.NewFTPConnection(profile.Host, profile.Port, profile.User, profile.Password)
-	if err := conn.Connect(); err != nil {
 		return err
 	}
 	defer conn.Close()

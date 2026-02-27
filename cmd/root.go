@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"zm/internal/config"
+	"zm/internal/connection"
 
 	"github.com/spf13/cobra"
 )
@@ -49,13 +50,25 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&profile, "profile", "p", "", "profile to use (overrides default)")
 }
 
-func GetConfig() *config.Config {
-	return cfg
-}
-
 func GetCurrentProfile() (*config.Profile, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
 	return cfg.GetProfile(cfg.DefaultProfile)
+}
+
+func openConnection() (*config.Profile, connection.Connection, error) {
+	profile, err := GetCurrentProfile()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	conn, err := connection.NewConnection(profile.Host, profile.Port, profile.User, profile.Password, profile.Protocol)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := conn.Connect(); err != nil {
+		return nil, nil, err
+	}
+	return profile, conn, nil
 }
