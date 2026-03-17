@@ -13,6 +13,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	editEditor string
+	editCreate bool
+)
+
 var editCmd = &cobra.Command{
 	Use:   "edit <dataset(member)> | <uss-path>",
 	Short: "Edit a member or USS file",
@@ -23,6 +28,8 @@ var editCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(editCmd)
+	editCmd.Flags().StringVar(&editEditor, "editor", "", "override editor (default: $VISUAL, $EDITOR, vi)")
+	editCmd.Flags().BoolVar(&editCreate, "create", false, "create member if it doesn't exist")
 }
 
 func runEdit(cmd *cobra.Command, args []string) error {
@@ -52,7 +59,11 @@ func editMember(conn connection.Connection, dsn string) error {
 
 	content, err := conn.ReadMember(dataset, member)
 	if err != nil {
-		return err
+		if editCreate {
+			content = nil
+		} else {
+			return err
+		}
 	}
 
 	tmpFile, err := writeTempFile(member, content)
@@ -61,7 +72,7 @@ func editMember(conn connection.Connection, dsn string) error {
 	}
 	defer os.Remove(tmpFile)
 
-	if err := editor.Open(tmpFile); err != nil {
+	if err := editor.Open(tmpFile, editEditor); err != nil {
 		return err
 	}
 
@@ -96,7 +107,7 @@ func editUSSFile(conn connection.Connection, path string) error {
 	}
 	defer os.Remove(tmpFile)
 
-	if err := editor.Open(tmpFile); err != nil {
+	if err := editor.Open(tmpFile, editEditor); err != nil {
 		return err
 	}
 

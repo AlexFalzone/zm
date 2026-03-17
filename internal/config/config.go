@@ -18,7 +18,8 @@ type Profile struct {
 	Port     int    `yaml:"port"`
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
-	Protocol string `yaml:"protocol"` // zosmf, ftp
+	Protocol string `yaml:"protocol"` // zosmf, ftp, ssh
+	KeyPath  string `yaml:"key_path,omitempty"`
 	HLQ      string `yaml:"hlq"`
 	USSHome  string `yaml:"uss_home"`
 }
@@ -111,11 +112,15 @@ func (p *Profile) Validate() error {
 	if p.User == "" {
 		return fmt.Errorf("user is required")
 	}
-	if p.Password == "" {
+	if p.Protocol == "ssh" {
+		if p.Password == "" && p.KeyPath == "" {
+			return fmt.Errorf("password or key_path is required for SSH")
+		}
+	} else if p.Password == "" {
 		return fmt.Errorf("password is required")
 	}
-	if p.Protocol != "zosmf" && p.Protocol != "ftp" {
-		return fmt.Errorf("protocol must be 'zosmf' or 'ftp'")
+	if p.Protocol != "zosmf" && p.Protocol != "ftp" && p.Protocol != "ssh" {
+		return fmt.Errorf("protocol must be 'zosmf', 'ftp', or 'ssh'")
 	}
 	return nil
 }
@@ -124,6 +129,8 @@ func DefaultPortForProtocol(protocol string) int {
 	switch protocol {
 	case "zosmf":
 		return 443
+	case "ssh":
+		return 22
 	default:
 		return 21
 	}

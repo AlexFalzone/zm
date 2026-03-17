@@ -39,6 +39,10 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+func SetVersion(v string) {
+	rootCmd.Version = v
+}
+
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -63,7 +67,7 @@ func openConnection() (*config.Profile, connection.Connection, error) {
 		return nil, nil, err
 	}
 
-	conn, err := connection.NewConnection(profile.Host, profile.Port, profile.User, profile.Password, profile.Protocol)
+	conn, err := connection.NewConnection(profile.Host, profile.Port, profile.User, profile.Password, profile.Protocol, profile.KeyPath)
 	if err != nil {
 		return nil, nil, err
 	}

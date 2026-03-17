@@ -11,7 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var submitWait bool
+var (
+	submitWait   bool
+	submitOutput bool
+)
 
 var submitCmd = &cobra.Command{
 	Use:   "submit <dataset(member)> | <local-file>",
@@ -24,19 +27,12 @@ var submitCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(submitCmd)
 	submitCmd.Flags().BoolVarP(&submitWait, "wait", "w", false, "wait for job to complete")
+	submitCmd.Flags().BoolVarP(&submitOutput, "output", "o", false, "show output on completion (implies --wait)")
 }
 
 func runSubmit(cmd *cobra.Command, args []string) error {
-	profile, err := GetCurrentProfile()
+	_, conn, err := openConnection()
 	if err != nil {
-		return err
-	}
-
-	conn, err := connection.NewConnection(profile.Host, profile.Port, profile.User, profile.Password, profile.Protocol)
-	if err != nil {
-		return err
-	}
-	if err := conn.Connect(); err != nil {
 		return err
 	}
 	defer conn.Close()
@@ -44,8 +40,22 @@ func runSubmit(cmd *cobra.Command, args []string) error {
 	source := args[0]
 	var jcl []byte
 
-	if _, err := os.Stat(source); err == nil {
-		// Local file
+	if strings.HasPrefix(source, "/") {
+		// Could be local or USS remote
+		if _, statErr := os.Stat(source); statErr == nil {
+			jcl, err = os.ReadFile(source)
+			if err != nil {
+				return fmt.Errorf("failed to read %s: %w", source, err)
+			}
+		} else {
+			// USS remote file
+			jcl, err = conn.ReadFile(source)
+			if err != nil {
+				return fmt.Errorf("failed to read USS file %s: %w", source, err)
+			}
+		}
+	} else if _, statErr := os.Stat(source); statErr == nil {
+		// Local file (relative path)
 		jcl, err = os.ReadFile(source)
 		if err != nil {
 			return fmt.Errorf("failed to read %s: %w", source, err)
@@ -69,11 +79,27 @@ func runSubmit(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Job %s submitted\n", jobid)
 
+	if submitOutput {
+		submitWait = true
+	}
+
 	if !submitWait {
 		return nil
 	}
 
-	return waitForJob(conn, jobid)
+	if err := waitForJob(conn, jobid); err != nil {
+		return err
+	}
+
+	if submitOutput {
+		output, err := conn.GetJobOutput(jobid)
+		if err != nil {
+			return fmt.Errorf("failed to get job output: %w", err)
+		}
+		fmt.Print(string(output))
+	}
+
+	return nil
 }
 
 func waitForJob(conn connection.Connection, jobid string) error {

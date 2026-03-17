@@ -58,9 +58,15 @@ func runConfigSetup(cmd *cobra.Command, args []string) error {
 	}
 
 	// Protocol
-	protocol := prompt(reader, "Protocol (zosmf/ftp)", "zosmf")
-	if protocol != "zosmf" && protocol != "ftp" {
-		return fmt.Errorf("protocol must be 'zosmf' or 'ftp'")
+	protocol := prompt(reader, "Protocol (zosmf/ftp/ssh)", "zosmf")
+	if protocol != "zosmf" && protocol != "ftp" && protocol != "ssh" {
+		return fmt.Errorf("protocol must be 'zosmf', 'ftp', or 'ssh'")
+	}
+
+	// SSH key path (only for SSH)
+	var keyPath string
+	if protocol == "ssh" {
+		keyPath = prompt(reader, "SSH key path (leave empty to use password)", "")
 	}
 
 	// Port (default depends on protocol)
@@ -84,6 +90,7 @@ func runConfigSetup(cmd *cobra.Command, args []string) error {
 		User:     user,
 		Password: password,
 		Protocol: protocol,
+		KeyPath:  keyPath,
 		HLQ:      hlq,
 		USSHome:  ussHome,
 	}

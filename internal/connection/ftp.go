@@ -21,6 +21,7 @@ type FTPConnection struct {
 	password string
 	conn     *ftp.ServerConn
 	debugBuf bytes.Buffer
+	uss      *ussClient
 }
 
 func NewFTPConnection(host string, port int, user, password string) *FTPConnection {
@@ -50,6 +51,10 @@ func (f *FTPConnection) Connect() error {
 }
 
 func (f *FTPConnection) Close() error {
+	if f.uss != nil {
+		f.uss.close()
+		f.uss = nil
+	}
 	if f.conn != nil {
 		if err := f.conn.Quit(); err != nil {
 			return fmt.Errorf("failed to close connection: %w", err)
@@ -59,13 +64,25 @@ func (f *FTPConnection) Close() error {
 	return nil
 }
 
+func (f *FTPConnection) getUSS() (*ussClient, error) {
+	if f.uss != nil {
+		return f.uss, nil
+	}
+	uss, err := newUSSClient(f.host, f.port, f.user, f.password)
+	if err != nil {
+		return nil, err
+	}
+	f.uss = uss
+	return uss, nil
+}
+
 func (f *FTPConnection) ListDatasets(pattern string) ([]string, error) {
 	if f.conn == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
 	// z/OS FTP: list datasets matching pattern (e.g., 'USERNAME.*')
-	query := fmt.Sprintf("'%s.*'", pattern)
+	query := fmt.Sprintf("'%s'", strings.Trim(pattern, "'"))
 	entries, err := f.conn.NameList(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list datasets: %w", err)
@@ -222,42 +239,86 @@ func (f *FTPConnection) WriteMember(dataset, member string, content []byte) erro
 	return nil
 }
 
-func (f *FTPConnection) ReadFile(path string) ([]byte, error) {
+func (f *FTPConnection) ListFiles(dirPath string) ([]USSFile, error) {
 	if f.conn == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
-	// Set ASCII mode for EBCDIC to ASCII conversion
-	if err := f.conn.Type(ftp.TransferTypeASCII); err != nil {
-		return nil, fmt.Errorf("failed to set ASCII mode: %w", err)
+	if err := f.conn.ChangeDir(dirPath); err != nil {
+		return nil, fmt.Errorf("failed to access %s: %w", dirPath, err)
 	}
 
-	reader, err := f.conn.Retr(path)
+	// Try LIST first (full metadata format)
+	f.debugBuf.Reset()
+	f.conn.List("")
+
+	files, _ := parseUSSListFromDebug(f.debugBuf.String())
+	if len(files) > 0 {
+		return files, nil
+	}
+
+	// If empty, retry with -a to catch hidden files (name-only format)
+	f.debugBuf.Reset()
+	f.conn.List("-a")
+
+	return parseUSSListFromDebug(f.debugBuf.String())
+}
+
+func parseUSSListFromDebug(debug string) ([]USSFile, error) {
+	lines := strings.Split(debug, "\n")
+	files := make([]USSFile, 0, len(lines)/2)
+
+	inList := false
+	for _, line := range lines {
+		if strings.Contains(line, "125 List started") || strings.Contains(line, "150 Opening") {
+			inList = true
+			continue
+		}
+		if strings.Contains(line, "250 List completed") || strings.Contains(line, "226 Transfer") {
+			break
+		}
+		if !inList {
+			continue
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "total ") {
+			continue
+		}
+
+		// Full format: drwxr-xr-x  2 USER GROUP 8192 Mar 12 10:20 name
+		// Name-only format: .bashrc
+		f := parseUSSLine(line)
+		if f.Name == "" {
+			// Name-only format (LIST -a on z/OS returns plain names)
+			name := line
+			if name == "." || name == ".." {
+				continue
+			}
+			f = USSFile{Name: name, Type: "file"}
+		}
+		if f.Name != "." && f.Name != ".." {
+			files = append(files, f)
+		}
+	}
+
+	return files, nil
+}
+
+func (f *FTPConnection) ReadFile(path string) ([]byte, error) {
+	uss, err := f.getUSS()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", path, err)
+		return nil, err
 	}
-	defer reader.Close()
-
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, reader); err != nil {
-		return nil, fmt.Errorf("failed to read content: %w", err)
-	}
-	return buf.Bytes(), nil
+	return uss.readFile(path)
 }
 
 func (f *FTPConnection) WriteFile(path string, content []byte) error {
-	if f.conn == nil {
-		return fmt.Errorf("not connected")
+	uss, err := f.getUSS()
+	if err != nil {
+		return err
 	}
-
-	if err := f.conn.Type(ftp.TransferTypeASCII); err != nil {
-		return fmt.Errorf("failed to set ASCII mode: %w", err)
-	}
-
-	if err := f.conn.Stor(path, bytes.NewReader(content)); err != nil {
-		return fmt.Errorf("failed to write %s: %w", path, err)
-	}
-	return nil
+	return uss.writeFile(path, content)
 }
 
 func (f *FTPConnection) SubmitJCL(jcl []byte) (string, error) {
@@ -345,6 +406,24 @@ func (f *FTPConnection) GetJobOutput(jobid string) ([]byte, error) {
 	}
 
 	return jes.getJobOutput(jobid)
+}
+
+func (f *FTPConnection) CancelJob(jobid string) error {
+	return fmt.Errorf("cancel job is not supported via FTP")
+}
+
+func (f *FTPConnection) PurgeJob(jobid string) error {
+	jes, err := newJESClient(f.host, f.port, f.user, f.password)
+	if err != nil {
+		return err
+	}
+	defer jes.close()
+
+	if err := jes.setOwner(f.user); err != nil {
+		return err
+	}
+
+	return jes.purgeJob(jobid)
 }
 
 var _ Connection = (*FTPConnection)(nil)

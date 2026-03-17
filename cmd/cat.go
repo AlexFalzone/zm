@@ -7,6 +7,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	catLines bool
+	catHead  int
+	catTail  int
+)
+
 var catCmd = &cobra.Command{
 	Use:   "cat <dataset(member)>",
 	Short: "Display content of a member or USS file",
@@ -17,6 +23,9 @@ var catCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(catCmd)
+	catCmd.Flags().BoolVarP(&catLines, "lines", "n", false, "show line numbers")
+	catCmd.Flags().IntVar(&catHead, "head", 0, "show first N lines")
+	catCmd.Flags().IntVar(&catTail, "tail", 0, "show last N lines")
 }
 
 func runCat(cmd *cobra.Command, args []string) error {
@@ -26,33 +35,56 @@ func runCat(cmd *cobra.Command, args []string) error {
 	}
 	defer conn.Close()
 
+	if catHead > 0 && catTail > 0 {
+		return fmt.Errorf("--head and --tail are mutually exclusive")
+	}
+
 	path := args[0]
 	if path == "" {
 		return fmt.Errorf("path cannot be empty")
 	}
 
-	// USS path starts with /
+	var content []byte
+
 	if path[0] == '/' {
-		content, err := conn.ReadFile(path)
-		if err != nil {
-			return err
+		content, err = conn.ReadFile(path)
+	} else {
+		dataset, member, parseErr := parseDSN(path)
+		if parseErr != nil {
+			return parseErr
 		}
-		fmt.Print(string(content))
-		return nil
+		content, err = conn.ReadMember(dataset, member)
 	}
 
-	// Dataset member: DATASET(MEMBER)
-	dataset, member, err := parseDSN(path)
 	if err != nil {
 		return err
 	}
 
-	content, err := conn.ReadMember(dataset, member)
-	if err != nil {
-		return err
-	}
-	fmt.Print(string(content))
+	printContent(string(content), catLines, catHead, catTail)
 	return nil
+}
+
+func printContent(content string, showLines bool, head, tail int) {
+	lines := strings.Split(content, "\n")
+
+	// Remove trailing empty line from final newline
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	if head > 0 && head < len(lines) {
+		lines = lines[:head]
+	} else if tail > 0 && tail < len(lines) {
+		lines = lines[len(lines)-tail:]
+	}
+
+	for i, line := range lines {
+		if showLines {
+			fmt.Printf("%6d  %s\n", i+1, line)
+		} else {
+			fmt.Println(line)
+		}
+	}
 }
 
 func parseDSN(dsn string) (dataset, member string, err error) {

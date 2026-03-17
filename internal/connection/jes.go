@@ -116,7 +116,7 @@ func (c *jesClient) storData(cmd string, data []byte) ([]string, error) {
 		return nil, fmt.Errorf("failed to connect data channel: %w", err)
 	}
 
-	if err := c.send(cmd); err != nil {
+	if err := c.send("%s", cmd); err != nil {
 		dataConn.Close()
 		return nil, err
 	}
@@ -149,6 +149,13 @@ func (c *jesClient) storData(cmd string, data []byte) ([]string, error) {
 	}
 
 	return responses, nil
+}
+
+func (c *jesClient) purgeJob(jobid string) error {
+	if strings.ContainsAny(jobid, "\r\n") {
+		return fmt.Errorf("invalid jobid: contains control characters")
+	}
+	return c.cmd("DELE %s", jobid)
 }
 
 func (c *jesClient) getJobOutput(jobid string) ([]byte, error) {
@@ -187,7 +194,7 @@ func (c *jesClient) retrData(cmd, arg string) ([]string, error) {
 			return nil, fmt.Errorf("failed to send %s: %w", cmd, err)
 		}
 	} else {
-		if err := c.send(cmd); err != nil {
+		if err := c.send("%s", cmd); err != nil {
 			return nil, fmt.Errorf("failed to send %s: %w", cmd, err)
 		}
 	}

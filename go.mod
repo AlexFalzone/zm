@@ -1,6 +1,6 @@
 module zm
 
-go 1.23
+go 1.25.0
 
 require (
 	github.com/jlaffaye/ftp v0.2.0
@@ -12,5 +12,9 @@ require (
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/kr/fs v0.1.0 // indirect
+	github.com/pkg/sftp v1.13.10 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
+	golang.org/x/crypto v0.49.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 )

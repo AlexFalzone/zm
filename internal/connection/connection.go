@@ -21,6 +21,16 @@ type Member struct {
 	User    string
 }
 
+type USSFile struct {
+	Name  string
+	Type  string // file, directory, symlink
+	Size  int64
+	Mode  string
+	User  string
+	Group string
+	Mtime string
+}
+
 // Connection is implemented by all transport protocols (FTP, SFTP, future z/OSMF)
 type Connection interface {
 	Connect() error
@@ -33,6 +43,7 @@ type Connection interface {
 	WriteMember(dataset, member string, content []byte) error
 
 	// USS
+	ListFiles(path string) ([]USSFile, error)
 	ReadFile(path string) ([]byte, error)
 	WriteFile(path string, content []byte) error
 
@@ -41,4 +52,6 @@ type Connection interface {
 	ListJobs(owner string) ([]JobStatus, error)
 	GetJobStatus(jobid string) (*JobStatus, error)
 	GetJobOutput(jobid string) ([]byte, error)
+	CancelJob(jobid string) error
+	PurgeJob(jobid string) error
 }

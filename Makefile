@@ -17,7 +17,7 @@ clean:
 	go clean
 
 test:
-	go test ./...
+	go test -race ./...
 
 lint:
 	golangci-lint run

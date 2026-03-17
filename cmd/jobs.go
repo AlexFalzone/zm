@@ -3,7 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
+	"time"
 
 	"zm/internal/connection"
 
@@ -13,6 +15,12 @@ import (
 var (
 	jobsOwner  string
 	jobsOutput bool
+	jobsCancel bool
+	jobsPurge  bool
+	jobsTail   bool
+	jobsDD     string
+	jobsStatus string
+	jobsLimit  int
 )
 
 var jobsCmd = &cobra.Command{
@@ -26,6 +34,12 @@ func init() {
 	rootCmd.AddCommand(jobsCmd)
 	jobsCmd.Flags().StringVar(&jobsOwner, "owner", "", "filter by owner (default: current user, use '*' for all)")
 	jobsCmd.Flags().BoolVarP(&jobsOutput, "output", "o", false, "show job output (requires jobid)")
+	jobsCmd.Flags().BoolVar(&jobsCancel, "cancel", false, "cancel an active job (requires jobid)")
+	jobsCmd.Flags().BoolVar(&jobsPurge, "purge", false, "purge job from spool (requires jobid)")
+	jobsCmd.Flags().BoolVarP(&jobsTail, "tail", "f", false, "follow job output in real-time (requires jobid)")
+	jobsCmd.Flags().StringVar(&jobsDD, "dd", "", "filter output by DD name (requires --output)")
+	jobsCmd.Flags().StringVar(&jobsStatus, "status", "", "filter job list by status (ACTIVE, OUTPUT, INPUT)")
+	jobsCmd.Flags().IntVar(&jobsLimit, "limit", 0, "limit number of results")
 }
 
 func runJobs(cmd *cobra.Command, args []string) error {
@@ -38,12 +52,54 @@ func runJobs(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		jobid := args[0]
 
+		// Mutually exclusive actions
+		actions := 0
+		if jobsCancel {
+			actions++
+		}
+		if jobsPurge {
+			actions++
+		}
+		if jobsTail {
+			actions++
+		}
+		if jobsOutput {
+			actions++
+		}
+		if actions > 1 {
+			return fmt.Errorf("--output, --cancel, --purge, and --tail are mutually exclusive")
+		}
+
+		if jobsCancel {
+			if err := conn.CancelJob(jobid); err != nil {
+				return err
+			}
+			fmt.Printf("Job %s cancel requested\n", jobid)
+			return nil
+		}
+
+		if jobsPurge {
+			if err := conn.PurgeJob(jobid); err != nil {
+				return err
+			}
+			fmt.Printf("Job %s purged\n", jobid)
+			return nil
+		}
+
+		if jobsTail {
+			return tailJob(conn, jobid)
+		}
+
 		if jobsOutput {
 			output, err := conn.GetJobOutput(jobid)
 			if err != nil {
 				return err
 			}
-			fmt.Print(string(output))
+			if jobsDD != "" {
+				fmt.Print(filterByDD(string(output), jobsDD))
+			} else {
+				fmt.Print(string(output))
+			}
 			return nil
 		}
 
@@ -55,13 +111,41 @@ func runJobs(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// List mode — validate flags
 	if jobsOutput {
 		return fmt.Errorf("--output requires a jobid")
+	}
+	if jobsCancel {
+		return fmt.Errorf("--cancel requires a jobid")
+	}
+	if jobsPurge {
+		return fmt.Errorf("--purge requires a jobid")
+	}
+	if jobsTail {
+		return fmt.Errorf("--tail requires a jobid")
+	}
+	if jobsDD != "" {
+		return fmt.Errorf("--dd requires --output and a jobid")
 	}
 
 	jobs, err := conn.ListJobs(jobsOwner)
 	if err != nil {
 		return err
+	}
+
+	if jobsStatus != "" {
+		filter := strings.ToUpper(jobsStatus)
+		filtered := make([]connection.JobStatus, 0, len(jobs))
+		for _, j := range jobs {
+			if j.Status == filter {
+				filtered = append(filtered, j)
+			}
+		}
+		jobs = filtered
+	}
+
+	if jobsLimit > 0 && len(jobs) > jobsLimit {
+		jobs = jobs[:jobsLimit]
 	}
 
 	if len(jobs) == 0 {
@@ -71,6 +155,62 @@ func runJobs(cmd *cobra.Command, args []string) error {
 
 	printJobList(jobs)
 	return nil
+}
+
+func tailJob(conn connection.Connection, jobid string) error {
+	var lastLen int
+
+	for {
+		status, err := conn.GetJobStatus(jobid)
+		if err != nil {
+			return err
+		}
+
+		output, err := conn.GetJobOutput(jobid)
+		if err != nil && status.Status != "ACTIVE" {
+			return err
+		}
+
+		if len(output) > lastLen {
+			fmt.Print(string(output[lastLen:]))
+			lastLen = len(output)
+		}
+
+		if status.Status == "OUTPUT" {
+			return nil
+		}
+
+		time.Sleep(2 * time.Second)
+	}
+}
+
+func filterByDD(output, ddName string) string {
+	ddName = strings.ToUpper(ddName)
+	var result strings.Builder
+	lines := strings.Split(output, "\n")
+	capturing := false
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "--- DD: ") {
+			// Extract DD name from header "--- DD: NAME (Step: STEP) ---"
+			header := strings.TrimPrefix(line, "--- DD: ")
+			if spaceIdx := strings.IndexByte(header, ' '); spaceIdx != -1 {
+				header = header[:spaceIdx]
+			}
+			capturing = strings.ToUpper(header) == ddName
+			if capturing {
+				result.WriteString(line)
+				result.WriteByte('\n')
+			}
+			continue
+		}
+		if capturing {
+			result.WriteString(line)
+			result.WriteByte('\n')
+		}
+	}
+
+	return result.String()
 }
 
 func printJobList(jobs []connection.JobStatus) {

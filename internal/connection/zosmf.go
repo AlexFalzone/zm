@@ -220,6 +220,69 @@ func (z *ZOSMFConnection) WriteMember(dataset, member string, content []byte) er
 
 // --- USS operations ---
 
+type ussListResponse struct {
+	Items []struct {
+		Name  string `json:"name"`
+		Mode  string `json:"mode"`
+		Size  int64  `json:"size"`
+		UID   int    `json:"uid"`
+		User  string `json:"user"`
+		GID   int    `json:"gid"`
+		Group string `json:"group"`
+		Mtime string `json:"mtime"`
+	} `json:"items"`
+}
+
+func (z *ZOSMFConnection) ListFiles(dirPath string) ([]USSFile, error) {
+	dirPath = strings.TrimRight(dirPath, "/")
+	apiPath := "/zosmf/restfiles/fs?path=" + dirPath
+	resp, err := z.doRequest("GET", apiPath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list %s: %w", dirPath, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, zosmfError(fmt.Sprintf("failed to list %s", dirPath), resp)
+	}
+	defer resp.Body.Close()
+
+	var result ussListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to parse file list: %w", err)
+	}
+
+	files := make([]USSFile, 0, len(result.Items))
+	for _, item := range result.Items {
+		if item.Name == "." || item.Name == ".." {
+			continue
+		}
+		f := USSFile{
+			Name:  item.Name,
+			Type:  ussTypeFromMode(item.Mode),
+			Size:  item.Size,
+			Mode:  item.Mode,
+			User:  item.User,
+			Group: item.Group,
+			Mtime: item.Mtime,
+		}
+		files = append(files, f)
+	}
+	return files, nil
+}
+
+func ussTypeFromMode(mode string) string {
+	if len(mode) == 0 {
+		return "file"
+	}
+	switch mode[0] {
+	case 'd':
+		return "directory"
+	case 'l':
+		return "symlink"
+	default:
+		return "file"
+	}
+}
+
 func (z *ZOSMFConnection) ReadFile(path string) ([]byte, error) {
 	ussPath := "/zosmf/restfiles/fs" + path
 	resp, err := z.doRequest("GET", ussPath, nil, "X-IBM-Data-Type", "text")
@@ -428,6 +491,43 @@ func (z *ZOSMFConnection) GetJobOutput(jobid string) ([]byte, error) {
 	}
 
 	return []byte(output.String()), nil
+}
+
+func (z *ZOSMFConnection) CancelJob(jobid string) error {
+	status, err := z.GetJobStatus(jobid)
+	if err != nil {
+		return err
+	}
+
+	path := fmt.Sprintf("/zosmf/restjobs/jobs/%s/%s", status.JobName, jobid)
+	resp, err := z.doRequest("PUT", path, strings.NewReader(`{"request":"cancel"}`),
+		"Content-Type", "application/json")
+	if err != nil {
+		return fmt.Errorf("failed to cancel job %s: %w", jobid, err)
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return zosmfError(fmt.Sprintf("failed to cancel job %s", jobid), resp)
+	}
+	resp.Body.Close()
+	return nil
+}
+
+func (z *ZOSMFConnection) PurgeJob(jobid string) error {
+	status, err := z.GetJobStatus(jobid)
+	if err != nil {
+		return err
+	}
+
+	path := fmt.Sprintf("/zosmf/restjobs/jobs/%s/%s", status.JobName, jobid)
+	resp, err := z.doRequest("DELETE", path, nil)
+	if err != nil {
+		return fmt.Errorf("failed to purge job %s: %w", jobid, err)
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return zosmfError(fmt.Sprintf("failed to purge job %s", jobid), resp)
+	}
+	resp.Body.Close()
+	return nil
 }
 
 var _ Connection = (*ZOSMFConnection)(nil)

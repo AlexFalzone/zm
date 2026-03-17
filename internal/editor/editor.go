@@ -18,10 +18,14 @@ func DetectEditor() string {
 }
 
 // Open opens the file in the user's editor and blocks until the editor exits.
-func Open(path string) error {
-	editor := DetectEditor()
+// If editorOverride is non-empty, it is used instead of the detected editor.
+func Open(path, editorOverride string) error {
+	ed := editorOverride
+	if ed == "" {
+		ed = DetectEditor()
+	}
 
-	parts := strings.Fields(editor)
+	parts := strings.Fields(ed)
 	bin := parts[0]
 	args := append(parts[1:], path)
 
