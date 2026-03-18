@@ -159,6 +159,7 @@ func runJobs(cmd *cobra.Command, args []string) error {
 
 func tailJob(conn connection.Connection, jobid string) error {
 	var lastLen int
+	delay := time.Second
 
 	for {
 		status, err := conn.GetJobStatus(jobid)
@@ -174,13 +175,16 @@ func tailJob(conn connection.Connection, jobid string) error {
 		if len(output) > lastLen {
 			fmt.Print(string(output[lastLen:]))
 			lastLen = len(output)
+			delay = time.Second // reset on new output
+		} else if delay < 30*time.Second {
+			delay = delay * 3 / 2 // grow 1.5x up to 30s
 		}
 
 		if status.Status == "OUTPUT" {
 			return nil
 		}
 
-		time.Sleep(2 * time.Second)
+		time.Sleep(delay)
 	}
 }
 

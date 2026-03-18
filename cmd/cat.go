@@ -72,15 +72,17 @@ func printContent(content string, showLines bool, head, tail int) {
 		lines = lines[:len(lines)-1]
 	}
 
+	startLine := 0
 	if head > 0 && head < len(lines) {
 		lines = lines[:head]
 	} else if tail > 0 && tail < len(lines) {
-		lines = lines[len(lines)-tail:]
+		startLine = len(lines) - tail
+		lines = lines[startLine:]
 	}
 
 	for i, line := range lines {
 		if showLines {
-			fmt.Printf("%6d  %s\n", i+1, line)
+			fmt.Printf("%6d  %s\n", startLine+i+1, line)
 		} else {
 			fmt.Println(line)
 		}

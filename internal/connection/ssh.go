@@ -1,7 +1,6 @@
 package connection
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"zm/internal/ebcdic"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -146,21 +147,6 @@ func (s *SSHConnection) exec(cmd string) (string, error) {
 	return string(out), nil
 }
 
-func (s *SSHConnection) execWithStdin(cmd string, stdin []byte) (string, error) {
-	session, err := s.client.NewSession()
-	if err != nil {
-		return "", fmt.Errorf("failed to create SSH session: %w", err)
-	}
-	defer session.Close()
-
-	session.Stdin = bytes.NewReader(stdin)
-	out, err := session.CombinedOutput(cmd)
-	if err != nil {
-		return string(out), fmt.Errorf("command failed: %w: %s", err, string(out))
-	}
-	return string(out), nil
-}
-
 // hostKeyCallback returns an ssh.HostKeyCallback that uses ~/.ssh/known_hosts.
 // Trust On First Use: if the host is unknown, its key is appended to known_hosts.
 // If the host is known but the key changed, the connection is rejected.
@@ -288,11 +274,19 @@ func (s *SSHConnection) ReadFile(path string) ([]byte, error) {
 
 	f, err := s.sftp.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open %s: %w", path, err)
+		return nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 	defer f.Close()
 
-	return io.ReadAll(f)
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", path, err)
+	}
+
+	if ebcdic.IsEBCDIC(data) {
+		data = ebcdic.ToASCII(data)
+	}
+	return data, nil
 }
 
 func (s *SSHConnection) WriteFile(path string, content []byte) error {
@@ -300,14 +294,23 @@ func (s *SSHConnection) WriteFile(path string, content []byte) error {
 		return err
 	}
 
-	f, err := s.sftp.Create(path)
+	// Write ASCII to temp file via SFTP, then convert to EBCDIC
+	tmpPath := fmt.Sprintf("/tmp/zm_uss_%d", time.Now().UnixNano())
+	f, err := s.sftp.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("failed to create %s: %w", path, err)
+		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer f.Close()
+	if _, err := f.Write(content); err != nil {
+		f.Close()
+		s.exec(fmt.Sprintf("rm -f '%s'", tmpPath))
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	f.Close()
 
-	_, err = f.Write(content)
+	// Convert ASCII→EBCDIC and move to destination
+	_, err = s.exec(fmt.Sprintf("iconv -f ISO8859-1 -t IBM-1047 '%s' > '%s' && rm '%s'", tmpPath, path, tmpPath))
 	if err != nil {
+		s.exec(fmt.Sprintf("rm -f '%s'", tmpPath))
 		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
 	return nil
@@ -427,26 +430,8 @@ func (s *SSHConnection) ReadMember(dataset, member string) ([]byte, error) {
 	return []byte(out), nil
 }
 
-func (s *SSHConnection) WriteMember(dataset, member string, content []byte) error {
-	dsn := strings.Trim(dataset, "'")
-	if err := validateDSN(dsn); err != nil {
-		return err
-	}
-	if err := validateDSN(member); err != nil {
-		return err
-	}
-
-	tmpPath := fmt.Sprintf("/tmp/zm_write_%d", time.Now().UnixNano())
-	if err := s.WriteFile(tmpPath, content); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	_, err := s.exec(fmt.Sprintf(`cp %s "//'%s(%s)'" && rm %s`, tmpPath, dsn, member, tmpPath))
-	if err != nil {
-		s.exec(fmt.Sprintf("rm -f %s", tmpPath))
-		return fmt.Errorf("failed to write %s(%s): %w", dsn, member, err)
-	}
-	return nil
+func (s *SSHConnection) WriteMember(_, _ string, _ []byte) error {
+	return fmt.Errorf("writing to MVS datasets is not supported via SSH (z/OS USS lacks tools to write to PDS members); use FTP or z/OSMF protocol instead")
 }
 
 // --- JES operations (via SSH exec) ---

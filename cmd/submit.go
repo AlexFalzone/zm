@@ -104,6 +104,7 @@ func runSubmit(cmd *cobra.Command, args []string) error {
 
 func waitForJob(conn connection.Connection, jobid string) error {
 	fmt.Printf("Waiting for %s...", jobid)
+	delay := time.Second
 
 	for {
 		status, err := conn.GetJobStatus(jobid)
@@ -127,6 +128,9 @@ func waitForJob(conn connection.Connection, jobid string) error {
 		}
 
 		fmt.Print(".")
-		time.Sleep(2 * time.Second)
+		time.Sleep(delay)
+		if delay < 30*time.Second {
+			delay = delay * 3 / 2
+		}
 	}
 }

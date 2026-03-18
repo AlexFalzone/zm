@@ -96,6 +96,25 @@ func listUSSFiles(conn connection.Connection, dirPath string) error {
 		return nil
 	}
 
+	if lsFilter != "" {
+		filter := strings.ToUpper(lsFilter)
+		filtered := make([]connection.USSFile, 0, len(files))
+		for _, f := range files {
+			if matchWildcard(strings.ToUpper(f.Name), filter) {
+				filtered = append(filtered, f)
+			}
+		}
+		files = filtered
+	}
+
+	sortUSSFiles(files, lsSort)
+
+	if lsReverse {
+		for i, j := 0, len(files)-1; i < j; i, j = i+1, j-1 {
+			files[i], files[j] = files[j], files[i]
+		}
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "TYPE\tNAME\tSIZE\tMODIFIED")
 	for _, f := range files {
@@ -116,6 +135,18 @@ func listDatasets(conn connection.Connection, pattern string) error {
 	if err != nil {
 		return err
 	}
+
+	if lsFilter != "" {
+		filter := strings.ToUpper(lsFilter)
+		filtered := make([]string, 0, len(datasets))
+		for _, ds := range datasets {
+			if matchWildcard(ds, filter) {
+				filtered = append(filtered, ds)
+			}
+		}
+		datasets = filtered
+	}
+
 	for _, ds := range datasets {
 		fmt.Println(ds)
 	}
@@ -155,6 +186,23 @@ func sortMembers(members []connection.Member, field string) {
 	default: // "name"
 		sort.Slice(members, func(i, j int) bool {
 			return members[i].Name < members[j].Name
+		})
+	}
+}
+
+func sortUSSFiles(files []connection.USSFile, field string) {
+	switch strings.ToLower(field) {
+	case "size":
+		sort.Slice(files, func(i, j int) bool {
+			return files[i].Size < files[j].Size
+		})
+	case "changed":
+		sort.Slice(files, func(i, j int) bool {
+			return files[i].Mtime < files[j].Mtime
+		})
+	default: // "name"
+		sort.Slice(files, func(i, j int) bool {
+			return files[i].Name < files[j].Name
 		})
 	}
 }

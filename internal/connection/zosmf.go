@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"zm/internal/ebcdic"
 )
 
 type ZOSMFConnection struct {
@@ -285,7 +287,7 @@ func ussTypeFromMode(mode string) string {
 
 func (z *ZOSMFConnection) ReadFile(path string) ([]byte, error) {
 	ussPath := "/zosmf/restfiles/fs" + path
-	resp, err := z.doRequest("GET", ussPath, nil, "X-IBM-Data-Type", "text")
+	resp, err := z.doRequest("GET", ussPath, nil, "X-IBM-Data-Type", "binary")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
@@ -294,13 +296,20 @@ func (z *ZOSMFConnection) ReadFile(path string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if ebcdic.IsEBCDIC(data) {
+		data = ebcdic.ToASCII(data)
+	}
+	return data, nil
 }
 
 func (z *ZOSMFConnection) WriteFile(path string, content []byte) error {
 	ussPath := "/zosmf/restfiles/fs" + path
 	resp, err := z.doRequest("PUT", ussPath, bytes.NewReader(content),
-		"X-IBM-Data-Type", "text", "Content-Type", "text/plain")
+		"X-IBM-Data-Type", "binary", "Content-Type", "application/octet-stream")
 	if err != nil {
 		return fmt.Errorf("failed to write %s: %w", path, err)
 	}

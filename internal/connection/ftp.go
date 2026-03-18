@@ -22,6 +22,7 @@ type FTPConnection struct {
 	conn     *ftp.ServerConn
 	debugBuf bytes.Buffer
 	uss      *ussClient
+	jes      *jesClient
 }
 
 func NewFTPConnection(host string, port int, user, password string) *FTPConnection {
@@ -51,6 +52,10 @@ func (f *FTPConnection) Connect() error {
 }
 
 func (f *FTPConnection) Close() error {
+	if f.jes != nil {
+		f.jes.close()
+		f.jes = nil
+	}
 	if f.uss != nil {
 		f.uss.close()
 		f.uss = nil
@@ -62,6 +67,22 @@ func (f *FTPConnection) Close() error {
 		f.conn = nil
 	}
 	return nil
+}
+
+func (f *FTPConnection) getJES() (*jesClient, error) {
+	if f.jes != nil {
+		return f.jes, nil
+	}
+	jes, err := newJESClient(f.host, f.port, f.user, f.password)
+	if err != nil {
+		return nil, err
+	}
+	if err := jes.setOwner(f.user); err != nil {
+		jes.close()
+		return nil, err
+	}
+	f.jes = jes
+	return jes, nil
 }
 
 func (f *FTPConnection) getUSS() (*ussClient, error) {
@@ -322,12 +343,10 @@ func (f *FTPConnection) WriteFile(path string, content []byte) error {
 }
 
 func (f *FTPConnection) SubmitJCL(jcl []byte) (string, error) {
-	jes, err := newJESClient(f.host, f.port, f.user, f.password)
+	jes, err := f.getJES()
 	if err != nil {
 		return "", err
 	}
-	defer jes.close()
-
 	return jes.submitJCL(jcl)
 }
 
@@ -347,19 +366,10 @@ func (f *FTPConnection) GetJobStatus(jobid string) (*JobStatus, error) {
 }
 
 func (f *FTPConnection) ListJobs(owner string) ([]JobStatus, error) {
-	jes, err := newJESClient(f.host, f.port, f.user, f.password)
+	jes, err := f.getJES()
 	if err != nil {
 		return nil, err
 	}
-	defer jes.close()
-
-	if owner == "" {
-		owner = f.user
-	}
-	if err := jes.setOwner(owner); err != nil {
-		return nil, err
-	}
-
 	return jes.listJobs()
 }
 
@@ -395,16 +405,10 @@ func parseJobLine(line string) JobStatus {
 }
 
 func (f *FTPConnection) GetJobOutput(jobid string) ([]byte, error) {
-	jes, err := newJESClient(f.host, f.port, f.user, f.password)
+	jes, err := f.getJES()
 	if err != nil {
 		return nil, err
 	}
-	defer jes.close()
-
-	if err := jes.setOwner(f.user); err != nil {
-		return nil, err
-	}
-
 	return jes.getJobOutput(jobid)
 }
 
@@ -413,16 +417,10 @@ func (f *FTPConnection) CancelJob(jobid string) error {
 }
 
 func (f *FTPConnection) PurgeJob(jobid string) error {
-	jes, err := newJESClient(f.host, f.port, f.user, f.password)
+	jes, err := f.getJES()
 	if err != nil {
 		return err
 	}
-	defer jes.close()
-
-	if err := jes.setOwner(f.user); err != nil {
-		return err
-	}
-
 	return jes.purgeJob(jobid)
 }
 
