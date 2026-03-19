@@ -1,24 +1,27 @@
 # zm
 
-CLI tool for interacting with z/OS mainframes via various source.
+CLI for z/OS mainframe operations.
+
+## Features
+
+- **Dataset operations** — list, read, edit, grep, diff members
+- **USS operations** — list, read, write files
+- **JCL** — submit jobs, check status, view output
+- **Three protocols** — z/OSMF, FTP, SSH (transparent switching via config)
+- **EBCDIC** — automatic encoding detection and conversion
+- **Retry** — configurable retry with exponential backoff
 
 ## Installation
 
-```bash
-go install github.com/AlexFalzone/zm@latest
-```
-
-Or build from source:
+Download the latest release from [Releases](https://github.com/AlexFalzone/zm/releases), or build from source:
 
 ```bash
 git clone https://github.com/AlexFalzone/zm.git
 cd zm
-make build
+go build -o zm .
 ```
 
 ## Configuration
-
-Create a profile:
 
 ```bash
 zm config setup
@@ -28,22 +31,20 @@ Config file is stored at `~/.zmconfig`:
 
 ```yaml
 profiles:
-  default:
+  myprofile:
     host: mainframe.example.com
-    port: 21
+    port: 443
     user: MYUSER
     password: mypassword
+    protocol: zosmf       # zosmf, ftp, ssh
     hlq: MYUSER
     uss_home: /u/myuser
+    encoding: ""           # "", "ascii", "ebcdic" (empty = auto-detect)
+    retry_attempts: 3
+    retry_delay: 1s
 
-default_profile: default
+default_profile: myprofile
 ```
 
-### Supported sources:
-- ftp
-- ssh
-- zosmf
-
-## Commands
-
+## Usage
 Just use the help section on the CLI.
