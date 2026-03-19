@@ -9,20 +9,24 @@ import (
 	"strings"
 	"time"
 
+	"zm/internal/retry"
+
 	"github.com/jlaffaye/ftp"
 )
 
 const ftpTimeout = 30 * time.Second
 
 type FTPConnection struct {
-	host     string
-	port     int
-	user     string
-	password string
-	conn     *ftp.ServerConn
-	debugBuf bytes.Buffer
-	uss      *ussClient
-	jes      *jesClient
+	host          string
+	port          int
+	user          string
+	password      string
+	retryAttempts int
+	retryDelay    time.Duration
+	conn          *ftp.ServerConn
+	debugBuf      bytes.Buffer
+	uss           *ussClient
+	jes           *jesClient
 }
 
 func NewFTPConnection(host string, port int, user, password string) *FTPConnection {
@@ -42,6 +46,15 @@ func (f *FTPConnection) ensureMainConn() error {
 	if f.conn != nil {
 		return nil
 	}
+	return retry.Do(retry.Config{
+		Attempts: f.retryAttempts,
+		Delay:    f.retryDelay,
+	}, func() error {
+		return f.dialMainConn()
+	})
+}
+
+func (f *FTPConnection) dialMainConn() error {
 	addr := net.JoinHostPort(f.host, strconv.Itoa(f.port))
 	conn, err := ftp.Dial(addr, ftp.DialWithTimeout(ftpTimeout), ftp.DialWithDebugOutput(&f.debugBuf))
 	if err != nil {
@@ -146,83 +159,7 @@ func (f *FTPConnection) ListMembers(dataset string) ([]Member, error) {
 	f.conn.List("")
 
 	// Parse the debug output to extract member info
-	return f.parseMemberListFromDebug(f.debugBuf.String())
-}
-
-func (f *FTPConnection) parseMemberListFromDebug(debug string) ([]Member, error) {
-	// Find list boundaries to avoid scanning the entire debug buffer
-	startMarker := "125 List started"
-	endMarker := "250 List completed"
-
-	startIdx := strings.Index(debug, startMarker)
-	if startIdx == -1 {
-		return nil, nil
-	}
-	startIdx += len(startMarker)
-
-	endIdx := strings.Index(debug[startIdx:], endMarker)
-	if endIdx == -1 {
-		endIdx = len(debug) - startIdx
-	}
-	listData := debug[startIdx : startIdx+endIdx]
-
-	lines := strings.Split(listData, "\n")
-	members := make([]Member, 0, len(lines))
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || (strings.Contains(line, "Name") && strings.Contains(line, "VV.MM")) {
-			continue
-		}
-
-		member := parseMemberLine(line)
-		if member.Name != "" {
-			members = append(members, member)
-		}
-	}
-
-	return members, nil
-}
-
-func parseMemberLine(line string) Member {
-	// Format: Name     VV.MM   Created       Changed      Size  Init   Mod   Id
-	// Example: HSISAPIE  01.82 2024/04/16 2025/12/10 20:18     5    27     0 FALZONE
-	fields := strings.Fields(line)
-	if len(fields) < 8 {
-		return Member{}
-	}
-
-	m := Member{Name: fields[0]}
-
-	// Parse VV.MM
-	if vvmm := strings.Split(fields[1], "."); len(vvmm) == 2 {
-		m.VV, _ = strconv.Atoi(vvmm[0])
-		m.MM, _ = strconv.Atoi(vvmm[1])
-	}
-
-	// Created date
-	m.Created = fields[2]
-
-	// Changed date and time
-	if len(fields) >= 5 {
-		m.Changed = fields[3] + " " + fields[4]
-	}
-
-	// Size, Init, Mod, User
-	if len(fields) >= 6 {
-		m.Size, _ = strconv.Atoi(fields[5])
-	}
-	if len(fields) >= 7 {
-		m.Init, _ = strconv.Atoi(fields[6])
-	}
-	if len(fields) >= 8 {
-		m.Mod, _ = strconv.Atoi(fields[7])
-	}
-	if len(fields) >= 9 {
-		m.User = fields[8]
-	}
-
-	return m
+	return parseMemberListFromDebug(f.debugBuf.String())
 }
 
 func (f *FTPConnection) ReadMember(dataset, member string) ([]byte, error) {
@@ -289,53 +226,6 @@ func (f *FTPConnection) ListFiles(dirPath string) ([]USSFile, error) {
 	return parseUSSListFromDebug(f.debugBuf.String())
 }
 
-func parseUSSListFromDebug(debug string) ([]USSFile, error) {
-	startIdx := -1
-	for _, marker := range []string{"150 Opening", "125 List started"} {
-		if idx := strings.Index(debug, marker); idx != -1 {
-			startIdx = idx + len(marker)
-			break
-		}
-	}
-	if startIdx == -1 {
-		return nil, nil
-	}
-
-	endIdx := len(debug)
-	for _, marker := range []string{"250 List completed", "226 Transfer"} {
-		if idx := strings.Index(debug[startIdx:], marker); idx != -1 {
-			if startIdx+idx < endIdx {
-				endIdx = startIdx + idx
-			}
-			break
-		}
-	}
-	listData := debug[startIdx:endIdx]
-
-	lines := strings.Split(listData, "\n")
-	files := make([]USSFile, 0, len(lines))
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "total ") {
-			continue
-		}
-
-		f := parseUSSLine(line)
-		if f.Name == "" {
-			if line == "." || line == ".." {
-				continue
-			}
-			f = USSFile{Name: line, Type: "file"}
-		}
-		if f.Name != "." && f.Name != ".." {
-			files = append(files, f)
-		}
-	}
-
-	return files, nil
-}
-
 func (f *FTPConnection) ReadFile(path string) ([]byte, error) {
 	uss, err := f.getUSS()
 	if err != nil {
@@ -374,37 +264,6 @@ func (f *FTPConnection) ListJobs(owner string) ([]JobStatus, error) {
 		return nil, err
 	}
 	return jes.listJobs()
-}
-
-func parseJobLine(line string) JobStatus {
-	// Format: JOBNAME  JOBID    OWNER    STATUS CLASS
-	// Example: MYJOB    JOB12345 FALZONE  OUTPUT A    RC=0000
-	fields := strings.Fields(line)
-	if len(fields) < 4 {
-		return JobStatus{}
-	}
-
-	job := JobStatus{
-		JobName: fields[0],
-		JobID:   fields[1],
-		Owner:   fields[2],
-		Status:  fields[3],
-	}
-
-	if len(fields) >= 5 {
-		job.Class = fields[4]
-	}
-
-	// Look for return code
-	for _, f := range fields {
-		if strings.HasPrefix(f, "RC=") {
-			job.RetCode = "CC " + strings.TrimPrefix(f, "RC=")
-		} else if strings.HasPrefix(f, "ABEND=") {
-			job.RetCode = "ABEND " + strings.TrimPrefix(f, "ABEND=")
-		}
-	}
-
-	return job
 }
 
 func (f *FTPConnection) GetJobOutput(jobid string) ([]byte, error) {

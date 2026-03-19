@@ -34,12 +34,53 @@ func TestIsEBCDIC(t *testing.T) {
 			data: []byte{},
 			want: false,
 		},
+		{
+			name: "EBCDIC without spaces",
+			data: ToEBCDIC([]byte("ABCDEFGHIJ")),
+			want: true,
+		},
+		{
+			name: "ASCII without spaces",
+			data: []byte("ABCDEFGHIJ"),
+			want: false,
+		},
+		{
+			name: "small file under 10 bytes",
+			data: ToEBCDIC([]byte("ABC")),
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := IsEBCDIC(tt.data); got != tt.want {
 				t.Errorf("IsEBCDIC() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestShouldConvert(t *testing.T) {
+	ebcdicData := ToEBCDIC([]byte("Hello World\n"))
+	asciiData := []byte("Hello World\n")
+
+	tests := []struct {
+		name     string
+		data     []byte
+		encoding string
+		want     bool
+	}{
+		{"explicit ebcdic", asciiData, "ebcdic", true},
+		{"explicit ascii", ebcdicData, "ascii", false},
+		{"explicit utf8", ebcdicData, "utf8", false},
+		{"auto-detect EBCDIC", ebcdicData, "", true},
+		{"auto-detect ASCII", asciiData, "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ShouldConvert(tt.data, tt.encoding); got != tt.want {
+				t.Errorf("ShouldConvert() = %v, want %v", got, tt.want)
 			}
 		})
 	}

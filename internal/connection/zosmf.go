@@ -3,44 +3,68 @@ package connection
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"zm/internal/ebcdic"
+	"zm/internal/retry"
 )
 
 type ZOSMFConnection struct {
-	host      string
-	port      int
-	user      string
-	password  string
-	client    *http.Client
-	transport *http.Transport
-	baseURL   string
+	host          string
+	port          int
+	user          string
+	password      string
+	encoding      string
+	tlsVerify     bool
+	caCertPath    string
+	retryAttempts int
+	retryDelay    time.Duration
+	client        *http.Client
+	transport     *http.Transport
+	baseURL       string
 }
 
-func NewZOSMFConnection(host string, port int, user, password string) *ZOSMFConnection {
+func NewZOSMFConnection(host string, port int, user, password, encoding string) *ZOSMFConnection {
 	return &ZOSMFConnection{
 		host:     host,
 		port:     port,
 		user:     user,
 		password: password,
+		encoding: encoding,
 	}
 }
 
 func (z *ZOSMFConnection) Connect() error {
 	z.baseURL = fmt.Sprintf("https://%s:%d", z.host, z.port)
+
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: !z.tlsVerify,
+	}
+	if z.caCertPath != "" {
+		caCert, err := os.ReadFile(z.caCertPath)
+		if err != nil {
+			return fmt.Errorf("failed to read CA certificate %s: %w", z.caCertPath, err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caCert) {
+			return fmt.Errorf("failed to parse CA certificate %s", z.caCertPath)
+		}
+		tlsConfig.RootCAs = pool
+		tlsConfig.InsecureSkipVerify = false
+	}
+
 	z.transport = &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
+		TLSClientConfig:     tlsConfig,
 		MaxIdleConns:        10,
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
@@ -65,19 +89,44 @@ func (z *ZOSMFConnection) Close() error {
 }
 
 func (z *ZOSMFConnection) doRequest(method, path string, body io.Reader, extraHeaders ...string) (*http.Response, error) {
-	req, err := http.NewRequest(method, z.baseURL+path, body)
-	if err != nil {
-		return nil, err
+	var bodyBytes []byte
+	if body != nil {
+		var err error
+		bodyBytes, err = io.ReadAll(body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read request body: %w", err)
+		}
 	}
 
-	req.SetBasicAuth(z.user, z.password)
-	req.Header.Set("X-CSRF-ZOSMF-HEADER", "*")
+	var resp *http.Response
+	err := retry.Do(retry.Config{
+		Attempts: z.retryAttempts,
+		Delay:    z.retryDelay,
+	}, func() error {
+		var bodyReader io.Reader
+		if bodyBytes != nil {
+			bodyReader = bytes.NewReader(bodyBytes)
+		}
+		req, err := http.NewRequest(method, z.baseURL+path, bodyReader)
+		if err != nil {
+			return err
+		}
 
-	for i := 0; i+1 < len(extraHeaders); i += 2 {
-		req.Header.Set(extraHeaders[i], extraHeaders[i+1])
-	}
+		req.SetBasicAuth(z.user, z.password)
+		req.Header.Set("X-CSRF-ZOSMF-HEADER", "*")
 
-	return z.client.Do(req)
+		for i := 0; i+1 < len(extraHeaders); i += 2 {
+			req.Header.Set(extraHeaders[i], extraHeaders[i+1])
+		}
+
+		resp, err = z.client.Do(req)
+		if err != nil && resp != nil {
+			resp.Body.Close()
+			resp = nil
+		}
+		return err
+	})
+	return resp, err
 }
 
 func zosmfError(action string, resp *http.Response) error {
@@ -300,7 +349,7 @@ func (z *ZOSMFConnection) ReadFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if ebcdic.IsEBCDIC(data) {
+	if ebcdic.ShouldConvert(data, z.encoding) {
 		ebcdic.ConvertToASCII(data)
 	}
 	return data, nil

@@ -48,6 +48,31 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		defer conn.Close()
 	}
 
+	contentA, contentB, err := readDiffSources(conn, source1, source2)
+	if err != nil {
+		return err
+	}
+
+	linesA := splitLines(contentA)
+	linesB := splitLines(contentB)
+
+	hunks := diff.Diff(linesA, linesB, diffContext)
+	if len(hunks) == 0 {
+		fmt.Println("Files are identical")
+		return nil
+	}
+
+	output := diff.FormatUnified(source1, source2, hunks)
+
+	if diffNoColor {
+		fmt.Print(output)
+	} else {
+		printColorDiff(output)
+	}
+	return nil
+}
+
+func readDiffSources(conn connection.Connection, source1, source2 string) (string, string, error) {
 	var contentA, contentB string
 	var errA, errB error
 
@@ -76,29 +101,12 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	if errA != nil {
-		return fmt.Errorf("source1: %w", errA)
+		return "", "", fmt.Errorf("source1: %w", errA)
 	}
 	if errB != nil {
-		return fmt.Errorf("source2: %w", errB)
+		return "", "", fmt.Errorf("source2: %w", errB)
 	}
-
-	linesA := splitLines(contentA)
-	linesB := splitLines(contentB)
-
-	hunks := diff.Diff(linesA, linesB, diffContext)
-	if len(hunks) == 0 {
-		fmt.Println("Files are identical")
-		return nil
-	}
-
-	output := diff.FormatUnified(source1, source2, hunks)
-
-	if diffNoColor {
-		fmt.Print(output)
-	} else {
-		printColorDiff(output)
-	}
-	return nil
+	return contentA, contentB, nil
 }
 
 func isLocalFile(source string) bool {

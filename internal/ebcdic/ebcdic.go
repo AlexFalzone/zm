@@ -73,7 +73,43 @@ func IsEBCDIC(data []byte) bool {
 	}
 
 	// If we see EBCDIC spaces but few ASCII spaces/newlines → EBCDIC
-	return ebcdicSpaces > 0 && asciiSpaces == 0 && asciiNewlines == 0
+	if ebcdicSpaces > 0 && asciiSpaces == 0 && asciiNewlines == 0 {
+		return true
+	}
+
+	// Fallback for files without spaces: compare printable byte ranges
+	if ebcdicSpaces == 0 && asciiSpaces == 0 {
+		var ebcdicPrintable, asciiPrintable int
+		for _, b := range sample {
+			// EBCDIC printable ranges (lowercase, uppercase, digits)
+			if (b >= 0x81 && b <= 0x89) || (b >= 0x91 && b <= 0x99) ||
+				(b >= 0xA2 && b <= 0xA9) || (b >= 0xC1 && b <= 0xC9) ||
+				(b >= 0xD1 && b <= 0xD9) || (b >= 0xE2 && b <= 0xE9) ||
+				(b >= 0xF0 && b <= 0xF9) {
+				ebcdicPrintable++
+			}
+			// ASCII printable range
+			if b >= 0x20 && b <= 0x7E {
+				asciiPrintable++
+			}
+		}
+		return ebcdicPrintable > asciiPrintable && asciiNewlines == 0
+	}
+
+	return false
+}
+
+// ShouldConvert decides whether to convert data from EBCDIC based on
+// an explicit config encoding or auto-detection.
+func ShouldConvert(data []byte, configEncoding string) bool {
+	switch configEncoding {
+	case "ebcdic":
+		return true
+	case "ascii", "utf8":
+		return false
+	default:
+		return IsEBCDIC(data)
+	}
 }
 
 // ToASCII converts IBM-1047 EBCDIC bytes to ASCII/Latin-1.
