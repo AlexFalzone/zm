@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,14 +15,19 @@ const (
 )
 
 type Profile struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	Protocol string `yaml:"protocol"` // zosmf, ftp, ssh
-	KeyPath  string `yaml:"key_path,omitempty"`
-	HLQ      string `yaml:"hlq"`
-	USSHome  string `yaml:"uss_home"`
+	Host          string        `yaml:"host"`
+	Port          int           `yaml:"port"`
+	User          string        `yaml:"user"`
+	Password      string        `yaml:"password"`
+	Protocol      string        `yaml:"protocol"` // zosmf, ftp, ssh
+	KeyPath       string        `yaml:"key_path,omitempty"`
+	HLQ           string        `yaml:"hlq"`
+	USSHome       string        `yaml:"uss_home"`
+	Encoding      string        `yaml:"encoding,omitempty"`       // "ascii", "ebcdic", "" (auto-detect)
+	TLSVerify     bool          `yaml:"tls_verify,omitempty"`     // verify TLS certificates (default false)
+	CACertPath    string        `yaml:"ca_cert_path,omitempty"`   // path to CA cert for TLS verification
+	RetryAttempts int           `yaml:"retry_attempts,omitempty"` // number of retry attempts (0 = no retry)
+	RetryDelay    time.Duration `yaml:"retry_delay,omitempty"`    // initial delay between retries (default 1s)
 }
 
 type Config struct {
@@ -38,11 +44,19 @@ func Load(path string) (*Config, error) {
 		path = filepath.Join(home, DefaultConfigFile)
 	}
 
-	data, err := os.ReadFile(path)
+	stat, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("config file not found: %s\nRun 'zm config setup' to create one", path)
 		}
+		return nil, fmt.Errorf("cannot read config file: %w", err)
+	}
+	if stat.Mode().Perm()&0077 != 0 {
+		fmt.Fprintf(os.Stderr, "warning: config file %s has insecure permissions %04o, should be 0600\n", path, stat.Mode().Perm())
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return nil, fmt.Errorf("cannot read config file: %w", err)
 	}
 

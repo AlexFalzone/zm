@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"zm/internal/ebcdic"
+	"zm/internal/retry"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -21,26 +22,37 @@ import (
 const sshTimeout = 30 * time.Second
 
 type SSHConnection struct {
-	host     string
-	port     int
-	user     string
-	password string
-	keyPath  string
-	client   *ssh.Client
-	sftp     *sftp.Client
+	host          string
+	port          int
+	user          string
+	password      string
+	keyPath       string
+	encoding      string
+	retryAttempts int
+	retryDelay    time.Duration
+	client        *ssh.Client
+	sftp          *sftp.Client
 }
 
-func NewSSHConnection(host string, port int, user, password, keyPath string) *SSHConnection {
+func NewSSHConnection(host string, port int, user, password, keyPath, encoding string) *SSHConnection {
 	return &SSHConnection{
 		host:     host,
 		port:     port,
 		user:     user,
 		password: password,
 		keyPath:  keyPath,
+		encoding: encoding,
 	}
 }
 
 func (s *SSHConnection) Connect() error {
+	return retry.Do(retry.Config{
+		Attempts: s.retryAttempts,
+		Delay:    s.retryDelay,
+	}, s.dial)
+}
+
+func (s *SSHConnection) dial() error {
 	hostKeyCallback, err := hostKeyCallback()
 	if err != nil {
 		return fmt.Errorf("failed to setup host key verification: %w", err)
@@ -283,7 +295,7 @@ func (s *SSHConnection) ReadFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
-	if ebcdic.IsEBCDIC(data) {
+	if ebcdic.ShouldConvert(data, s.encoding) {
 		ebcdic.ConvertToASCII(data)
 	}
 	return data, nil
@@ -294,23 +306,38 @@ func (s *SSHConnection) WriteFile(path string, content []byte) error {
 		return err
 	}
 
+	if s.encoding == "ascii" || s.encoding == "utf8" {
+		f, err := s.sftp.Create(path)
+		if err != nil {
+			return fmt.Errorf("failed to create %s: %w", path, err)
+		}
+		if _, err := f.Write(content); err != nil {
+			f.Close()
+			return fmt.Errorf("failed to write %s: %w", path, err)
+		}
+		return f.Close()
+	}
+
 	// Write ASCII to temp file via SFTP, then convert to EBCDIC
 	tmpPath := fmt.Sprintf("/tmp/zm_uss_%d", time.Now().UnixNano())
+	escapedTmp := shellEscape(tmpPath)
+	escapedPath := shellEscape(path)
+
 	f, err := s.sftp.Create(tmpPath)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	if _, err := f.Write(content); err != nil {
 		f.Close()
-		s.exec(fmt.Sprintf("rm -f '%s'", tmpPath))
+		s.exec(fmt.Sprintf("rm -f %s", escapedTmp))
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 	f.Close()
 
 	// Convert ASCII→EBCDIC and move to destination
-	_, err = s.exec(fmt.Sprintf("iconv -f ISO8859-1 -t IBM-1047 '%s' > '%s' && rm '%s'", tmpPath, path, tmpPath))
+	_, err = s.exec(fmt.Sprintf("iconv -f ISO8859-1 -t IBM-1047 %s > %s && rm %s", escapedTmp, escapedPath, escapedTmp))
 	if err != nil {
-		s.exec(fmt.Sprintf("rm -f '%s'", tmpPath))
+		s.exec(fmt.Sprintf("rm -f %s", escapedTmp))
 		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
 	return nil
@@ -335,45 +362,6 @@ func (s *SSHConnection) ListDatasets(pattern string) ([]string, error) {
 	return parseListDatasetsOutput(out), nil
 }
 
-func parseListDatasetsOutput(output string) []string {
-	lines := strings.Split(output, "\n")
-	var datasets []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Skip tsocmd header/status lines
-		if strings.HasPrefix(line, "READY") || strings.HasPrefix(line, "END") ||
-			strings.Contains(line, "LISTDS") || strings.Contains(line, "LISTCAT") ||
-			strings.Contains(line, "---") || strings.Contains(line, "NONVSAM") ||
-			strings.Contains(line, "IN-CAT") || strings.Contains(line, "THE FOLLOWING") {
-			continue
-		}
-		// Dataset names are uppercase alphanumeric with dots
-		if isDatasetName(line) {
-			datasets = append(datasets, line)
-		}
-	}
-	return datasets
-}
-
-func isDatasetName(s string) bool {
-	if len(s) == 0 || len(s) > 44 {
-		return false
-	}
-	for _, c := range s {
-		switch {
-		case c >= 'A' && c <= 'Z':
-		case c >= '0' && c <= '9':
-		case c == '.' || c == '@' || c == '#' || c == '$':
-		default:
-			return false
-		}
-	}
-	return true
-}
-
 func (s *SSHConnection) ListMembers(dataset string) ([]Member, error) {
 	dsn := strings.Trim(dataset, "'")
 	if err := validateDSN(dsn); err != nil {
@@ -386,32 +374,6 @@ func (s *SSHConnection) ListMembers(dataset string) ([]Member, error) {
 	}
 
 	return parseListMembersOutput(out), nil
-}
-
-func parseListMembersOutput(output string) []Member {
-	lines := strings.Split(output, "\n")
-	var members []Member
-	pastMembers := false
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.Contains(line, "--MEMBERS--") {
-			pastMembers = true
-			continue
-		}
-		if !pastMembers {
-			continue
-		}
-		if strings.HasPrefix(line, "READY") || strings.HasPrefix(line, "END") {
-			continue
-		}
-		if line != "" {
-			members = append(members, Member{Name: line})
-		}
-	}
-	return members
 }
 
 func (s *SSHConnection) ReadMember(dataset, member string) ([]byte, error) {
@@ -442,8 +404,9 @@ func (s *SSHConnection) SubmitJCL(jcl []byte) (string, error) {
 		return "", fmt.Errorf("failed to write JCL temp file: %w", err)
 	}
 
-	out, err := s.exec(fmt.Sprintf("submit %s", tmpPath))
-	s.exec(fmt.Sprintf("rm -f %s", tmpPath))
+	escapedTmp := shellEscape(tmpPath)
+	out, err := s.exec(fmt.Sprintf("submit %s", escapedTmp))
+	s.exec(fmt.Sprintf("rm -f %s", escapedTmp))
 	if err != nil {
 		return "", fmt.Errorf("failed to submit JCL: %w", err)
 	}
@@ -465,7 +428,6 @@ func parseSubmitOutput(output string) (string, error) {
 			for _, f := range fields {
 				f = strings.ToUpper(f)
 				if strings.HasPrefix(f, "JOB") && len(f) > 3 {
-					// Check if it looks like a job ID (JOBnnnnn)
 					if isJobID(f) {
 						return f, nil
 					}
@@ -474,18 +436,6 @@ func parseSubmitOutput(output string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("could not parse job ID from submit output: %s", output)
-}
-
-func isJobID(s string) bool {
-	if !strings.HasPrefix(s, "JOB") || len(s) < 4 {
-		return false
-	}
-	for _, c := range s[3:] {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func (s *SSHConnection) ListJobs(owner string) ([]JobStatus, error) {
@@ -499,48 +449,6 @@ func (s *SSHConnection) ListJobs(owner string) ([]JobStatus, error) {
 	}
 
 	return parseStatusOutput(out, strings.ToUpper(owner)), nil
-}
-
-func parseStatusOutput(output, owner string) []JobStatus {
-	// Expected format: "JOB MYJOB(JOB12345) ON OUTPUT QUEUE"
-	// or: "JOB MYJOB(JOB12345) EXECUTING"
-	lines := strings.Split(output, "\n")
-	var jobs []JobStatus
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "JOB ") {
-			continue
-		}
-
-		// Parse "JOB JOBNAME(JOBID) STATUS..."
-		rest := strings.TrimPrefix(line, "JOB ")
-		parenOpen := strings.Index(rest, "(")
-		parenClose := strings.Index(rest, ")")
-		if parenOpen == -1 || parenClose == -1 || parenClose <= parenOpen {
-			continue
-		}
-
-		jobName := strings.TrimSpace(rest[:parenOpen])
-		jobID := rest[parenOpen+1 : parenClose]
-		statusPart := strings.TrimSpace(rest[parenClose+1:])
-
-		status := "UNKNOWN"
-		if strings.Contains(strings.ToUpper(statusPart), "OUTPUT") {
-			status = "OUTPUT"
-		} else if strings.Contains(strings.ToUpper(statusPart), "EXECUTING") || strings.Contains(strings.ToUpper(statusPart), "ACTIVE") {
-			status = "ACTIVE"
-		} else if strings.Contains(strings.ToUpper(statusPart), "INPUT") {
-			status = "INPUT"
-		}
-
-		jobs = append(jobs, JobStatus{
-			JobID:   jobID,
-			JobName: jobName,
-			Owner:   owner,
-			Status:  status,
-		})
-	}
-	return jobs
 }
 
 func (s *SSHConnection) GetJobStatus(jobid string) (*JobStatus, error) {

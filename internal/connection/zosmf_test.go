@@ -59,7 +59,7 @@ func TestParseZOSMFJobsEmpty(t *testing.T) {
 }
 
 func TestNewZOSMFConnection(t *testing.T) {
-	conn := NewZOSMFConnection("host.example.com", 443, "user", "pass")
+	conn := NewZOSMFConnection("host.example.com", 443, "user", "pass", "")
 	if conn.host != "host.example.com" {
 		t.Errorf("host = %q, want host.example.com", conn.host)
 	}
@@ -81,7 +81,13 @@ func TestNewConnection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewConnection("host", 443, "user", "pass", tt.protocol, "")
+			_, err := NewConnection(ConnectionOptions{
+				Host:     "host",
+				Port:     443,
+				User:     "user",
+				Password: "pass",
+				Protocol: tt.protocol,
+			})
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewConnection() error = %v, wantErr %v", err, tt.wantErr)
 			}

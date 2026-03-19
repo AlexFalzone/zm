@@ -67,7 +67,19 @@ func openConnection() (*config.Profile, connection.Connection, error) {
 		return nil, nil, err
 	}
 
-	conn, err := connection.NewConnection(profile.Host, profile.Port, profile.User, profile.Password, profile.Protocol, profile.KeyPath)
+	conn, err := connection.NewConnection(connection.ConnectionOptions{
+		Host:          profile.Host,
+		Port:          profile.Port,
+		User:          profile.User,
+		Password:      profile.Password,
+		Protocol:      profile.Protocol,
+		KeyPath:       profile.KeyPath,
+		Encoding:      profile.Encoding,
+		TLSVerify:     profile.TLSVerify,
+		CACertPath:    profile.CACertPath,
+		RetryAttempts: profile.RetryAttempts,
+		RetryDelay:    profile.RetryDelay,
+	})
 	if err != nil {
 		return nil, nil, err
 	}

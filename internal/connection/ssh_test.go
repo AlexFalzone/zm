@@ -58,55 +58,6 @@ READY`,
 	}
 }
 
-func TestParseListMembersOutput(t *testing.T) {
-	tests := []struct {
-		name   string
-		output string
-		want   []string
-	}{
-		{
-			name: "standard output with members",
-			output: `FALZONE.SOURCE
---RECFM-LRECL-BLKSIZE-DSORG
-FB    80    27920   PO
---MEMBERS--
-PROG1
-PROG2
-MAIN
-READY`,
-			want: []string{"PROG1", "PROG2", "MAIN"},
-		},
-		{
-			name: "empty members",
-			output: `FALZONE.EMPTY
---RECFM-LRECL-BLKSIZE-DSORG
-FB    80    27920   PO
---MEMBERS--
-READY`,
-			want: nil,
-		},
-		{
-			name:   "no members section",
-			output: "FALZONE.SEQ\nREADY\n",
-			want:   nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := parseListMembersOutput(tt.output)
-			if len(got) != len(tt.want) {
-				t.Fatalf("parseListMembersOutput() returned %d members, want %d", len(got), len(tt.want))
-			}
-			for i, m := range got {
-				if m.Name != tt.want[i] {
-					t.Errorf("member[%d].Name = %q, want %q", i, m.Name, tt.want[i])
-				}
-			}
-		})
-	}
-}
-
 func TestParseSubmitOutput(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -145,72 +96,6 @@ func TestParseSubmitOutput(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("parseSubmitOutput() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseStatusOutput(t *testing.T) {
-	tests := []struct {
-		name   string
-		output string
-		owner  string
-		want   []JobStatus
-	}{
-		{
-			name:   "output queue",
-			output: "JOB MYJOB(JOB12345) ON OUTPUT QUEUE\n",
-			owner:  "FALZONE",
-			want: []JobStatus{
-				{JobID: "JOB12345", JobName: "MYJOB", Owner: "FALZONE", Status: "OUTPUT"},
-			},
-		},
-		{
-			name:   "executing",
-			output: "JOB TESTJOB(JOB00001) EXECUTING\n",
-			owner:  "FALZONE",
-			want: []JobStatus{
-				{JobID: "JOB00001", JobName: "TESTJOB", Owner: "FALZONE", Status: "ACTIVE"},
-			},
-		},
-		{
-			name: "multiple jobs",
-			output: `READY
-JOB BUILD(JOB00100) ON OUTPUT QUEUE
-JOB COMPILE(JOB00101) EXECUTING
-READY`,
-			owner: "USER1",
-			want: []JobStatus{
-				{JobID: "JOB00100", JobName: "BUILD", Owner: "USER1", Status: "OUTPUT"},
-				{JobID: "JOB00101", JobName: "COMPILE", Owner: "USER1", Status: "ACTIVE"},
-			},
-		},
-		{
-			name:   "no jobs",
-			output: "READY\nEND\n",
-			owner:  "FALZONE",
-			want:   nil,
-		},
-		{
-			name:   "input queue",
-			output: "JOB WAIT(JOB99999) ON INPUT QUEUE\n",
-			owner:  "FALZONE",
-			want: []JobStatus{
-				{JobID: "JOB99999", JobName: "WAIT", Owner: "FALZONE", Status: "INPUT"},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := parseStatusOutput(tt.output, tt.owner)
-			if len(got) != len(tt.want) {
-				t.Fatalf("parseStatusOutput() returned %d jobs, want %d\ngot: %+v", len(got), len(tt.want), got)
-			}
-			for i, j := range got {
-				if j != tt.want[i] {
-					t.Errorf("job[%d] = %+v, want %+v", i, j, tt.want[i])
-				}
 			}
 		})
 	}
@@ -265,29 +150,6 @@ func TestValidateUSSPath(t *testing.T) {
 			err := validateUSSPath(tt.path)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateUSSPath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestIsJobID(t *testing.T) {
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{"JOB12345", true},
-		{"JOB00001", true},
-		{"JOB1", true},
-		{"JOB", false},
-		{"JOBNAME", false},
-		{"TSU12345", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			if got := isJobID(tt.input); got != tt.want {
-				t.Errorf("isJobID(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}

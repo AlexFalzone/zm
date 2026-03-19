@@ -1,16 +1,44 @@
 package connection
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
-func NewConnection(host string, port int, user, password, protocol, keyPath string) (Connection, error) {
-	switch protocol {
+type ConnectionOptions struct {
+	Host          string
+	Port          int
+	User          string
+	Password      string
+	Protocol      string
+	KeyPath       string
+	Encoding      string
+	TLSVerify     bool
+	CACertPath    string
+	RetryAttempts int
+	RetryDelay    time.Duration
+}
+
+func NewConnection(opts ConnectionOptions) (Connection, error) {
+	switch opts.Protocol {
 	case "zosmf":
-		return NewZOSMFConnection(host, port, user, password), nil
+		z := NewZOSMFConnection(opts.Host, opts.Port, opts.User, opts.Password, opts.Encoding)
+		z.tlsVerify = opts.TLSVerify
+		z.caCertPath = opts.CACertPath
+		z.retryAttempts = opts.RetryAttempts
+		z.retryDelay = opts.RetryDelay
+		return z, nil
 	case "ftp":
-		return NewFTPConnection(host, port, user, password), nil
+		f := NewFTPConnection(opts.Host, opts.Port, opts.User, opts.Password)
+		f.retryAttempts = opts.RetryAttempts
+		f.retryDelay = opts.RetryDelay
+		return f, nil
 	case "ssh":
-		return NewSSHConnection(host, port, user, password, keyPath), nil
+		s := NewSSHConnection(opts.Host, opts.Port, opts.User, opts.Password, opts.KeyPath, opts.Encoding)
+		s.retryAttempts = opts.RetryAttempts
+		s.retryDelay = opts.RetryDelay
+		return s, nil
 	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", protocol)
+		return nil, fmt.Errorf("unsupported protocol: %s", opts.Protocol)
 	}
 }

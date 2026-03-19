@@ -278,27 +278,30 @@ func grepUSSRecursive(cmd *cobra.Command, conn connection.Connection, basePath, 
 			continue
 		}
 
-		content, err := conn.ReadFile(filePath)
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "warning: cannot read %s: %v\n", filePath, err)
-			continue
-		}
-
-		// Show path relative to the base search path
 		displayPath := filePath
 		if rel := strings.TrimPrefix(filePath, basePath); rel != filePath {
 			displayPath = strings.TrimPrefix(rel, "/")
 		}
 
-		matches := searchLines(string(content), matcher)
-		var printErr error
-		*totalMatches, printErr = printMatches(w, matches, displayPath, *totalMatches)
-		if printErr != nil {
-			return printErr
+		if err := grepFile(cmd, conn, filePath, displayPath, matcher, totalMatches, w); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+func grepFile(cmd *cobra.Command, conn connection.Connection, filePath, displayPath string, matcher func(string) bool, totalMatches *int, w *bufio.Writer) error {
+	content, err := conn.ReadFile(filePath)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: cannot read %s: %v\n", filePath, err)
+		return nil
+	}
+
+	matches := searchLines(string(content), matcher)
+	var printErr error
+	*totalMatches, printErr = printMatches(w, matches, displayPath, *totalMatches)
+	return printErr
 }
 
 func printMatches(w *bufio.Writer, matches []grepMatch, name string, totalMatches int) (int, error) {

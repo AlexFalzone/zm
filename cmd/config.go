@@ -10,6 +10,7 @@ import (
 	"zm/internal/config"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var configCmd = &cobra.Command{
@@ -153,8 +154,12 @@ func prompt(reader *bufio.Reader, label, defaultVal string) string {
 
 func promptPassword(reader *bufio.Reader, label string) string {
 	fmt.Printf("%s: ", label)
-	// Note: In a real implementation, we'd use term.ReadPassword for hidden input
-	// For now, just read normally (password will be visible)
-	input, _ := reader.ReadString('\n')
-	return strings.TrimSpace(input)
+	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println()
+	if err != nil {
+		// Fallback for non-terminal stdin (pipe, CI)
+		input, _ := reader.ReadString('\n')
+		return strings.TrimSpace(input)
+	}
+	return string(password)
 }
