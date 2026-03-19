@@ -198,19 +198,20 @@ const (
 )
 
 func printColorDiff(output string) {
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
+	var buf strings.Builder
+	for _, line := range strings.Split(output, "\n") {
 		switch {
 		case strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++"):
-			fmt.Println(colorCyan + line + colorReset)
+			buf.WriteString(colorCyan + line + colorReset + "\n")
 		case strings.HasPrefix(line, "@@"):
-			fmt.Println(colorCyan + line + colorReset)
+			buf.WriteString(colorCyan + line + colorReset + "\n")
 		case strings.HasPrefix(line, "-"):
-			fmt.Println(colorRed + line + colorReset)
+			buf.WriteString(colorRed + line + colorReset + "\n")
 		case strings.HasPrefix(line, "+"):
-			fmt.Println(colorGreen + line + colorReset)
+			buf.WriteString(colorGreen + line + colorReset + "\n")
 		default:
-			fmt.Println(line)
+			buf.WriteString(line + "\n")
 		}
 	}
+	fmt.Print(buf.String())
 }

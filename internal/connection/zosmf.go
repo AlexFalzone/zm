@@ -301,7 +301,7 @@ func (z *ZOSMFConnection) ReadFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	if ebcdic.IsEBCDIC(data) {
-		data = ebcdic.ToASCII(data)
+		ebcdic.ConvertToASCII(data)
 	}
 	return data, nil
 }

@@ -284,7 +284,7 @@ func (s *SSHConnection) ReadFile(path string) ([]byte, error) {
 	}
 
 	if ebcdic.IsEBCDIC(data) {
-		data = ebcdic.ToASCII(data)
+		ebcdic.ConvertToASCII(data)
 	}
 	return data, nil
 }

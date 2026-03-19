@@ -85,6 +85,13 @@ func ToASCII(data []byte) []byte {
 	return out
 }
 
+// ConvertToASCII converts IBM-1047 EBCDIC bytes to ASCII/Latin-1 in-place.
+func ConvertToASCII(data []byte) {
+	for i, b := range data {
+		data[i] = toASCIITable[b]
+	}
+}
+
 // ToEBCDIC converts ASCII/Latin-1 bytes to IBM-1047 EBCDIC.
 func ToEBCDIC(data []byte) []byte {
 	out := make([]byte, len(data))

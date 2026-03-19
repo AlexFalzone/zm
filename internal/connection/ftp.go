@@ -35,18 +35,26 @@ func NewFTPConnection(host string, port int, user, password string) *FTPConnecti
 }
 
 func (f *FTPConnection) Connect() error {
-	addr := net.JoinHostPort(f.host, strconv.Itoa(f.port))
+	return nil // lazy — connection opened on first dataset operation
+}
 
+func (f *FTPConnection) ensureMainConn() error {
+	if f.conn != nil {
+		return nil
+	}
+	addr := net.JoinHostPort(f.host, strconv.Itoa(f.port))
 	conn, err := ftp.Dial(addr, ftp.DialWithTimeout(ftpTimeout), ftp.DialWithDebugOutput(&f.debugBuf))
 	if err != nil {
 		return fmt.Errorf("failed to connect to %s: %w", addr, err)
 	}
-
 	if err := conn.Login(f.user, f.password); err != nil {
 		conn.Quit()
 		return fmt.Errorf("login failed: %w", err)
 	}
-
+	if err := conn.Type(ftp.TransferTypeASCII); err != nil {
+		conn.Quit()
+		return fmt.Errorf("failed to set ASCII mode: %w", err)
+	}
 	f.conn = conn
 	return nil
 }
@@ -98,8 +106,8 @@ func (f *FTPConnection) getUSS() (*ussClient, error) {
 }
 
 func (f *FTPConnection) ListDatasets(pattern string) ([]string, error) {
-	if f.conn == nil {
-		return nil, fmt.Errorf("not connected")
+	if err := f.ensureMainConn(); err != nil {
+		return nil, err
 	}
 
 	// z/OS FTP: list datasets matching pattern (e.g., 'USERNAME.*')
@@ -120,8 +128,8 @@ func (f *FTPConnection) ListDatasets(pattern string) ([]string, error) {
 }
 
 func (f *FTPConnection) ListMembers(dataset string) ([]Member, error) {
-	if f.conn == nil {
-		return nil, fmt.Errorf("not connected")
+	if err := f.ensureMainConn(); err != nil {
+		return nil, err
 	}
 
 	dsn := strings.Trim(dataset, "'")
@@ -218,13 +226,8 @@ func parseMemberLine(line string) Member {
 }
 
 func (f *FTPConnection) ReadMember(dataset, member string) ([]byte, error) {
-	if f.conn == nil {
-		return nil, fmt.Errorf("not connected")
-	}
-
-	// Set ASCII mode for EBCDIC to ASCII conversion
-	if err := f.conn.Type(ftp.TransferTypeASCII); err != nil {
-		return nil, fmt.Errorf("failed to set ASCII mode: %w", err)
+	if err := f.ensureMainConn(); err != nil {
+		return nil, err
 	}
 
 	// z/OS FTP: retrieve 'DATASET(MEMBER)'
@@ -243,12 +246,8 @@ func (f *FTPConnection) ReadMember(dataset, member string) ([]byte, error) {
 }
 
 func (f *FTPConnection) WriteMember(dataset, member string, content []byte) error {
-	if f.conn == nil {
-		return fmt.Errorf("not connected")
-	}
-
-	if err := f.conn.Type(ftp.TransferTypeASCII); err != nil {
-		return fmt.Errorf("failed to set ASCII mode: %w", err)
+	if err := f.ensureMainConn(); err != nil {
+		return err
 	}
 
 	dsn := fmt.Sprintf("'%s(%s)'", strings.Trim(dataset, "'"), member)
@@ -259,15 +258,23 @@ func (f *FTPConnection) WriteMember(dataset, member string, content []byte) erro
 }
 
 func (f *FTPConnection) ListFiles(dirPath string) ([]USSFile, error) {
-	if f.conn == nil {
-		return nil, fmt.Errorf("not connected")
+	if strings.HasPrefix(dirPath, "/") {
+		uss, err := f.getUSS()
+		if err != nil {
+			return nil, err
+		}
+		return uss.listFiles(dirPath)
+	}
+
+	// Dataset listing via main conn
+	if err := f.ensureMainConn(); err != nil {
+		return nil, err
 	}
 
 	if err := f.conn.ChangeDir(dirPath); err != nil {
 		return nil, fmt.Errorf("failed to access %s: %w", dirPath, err)
 	}
 
-	// Try LIST first (full metadata format)
 	f.debugBuf.Reset()
 	f.conn.List("")
 
@@ -276,7 +283,6 @@ func (f *FTPConnection) ListFiles(dirPath string) ([]USSFile, error) {
 		return files, nil
 	}
 
-	// If empty, retry with -a to catch hidden files (name-only format)
 	f.debugBuf.Reset()
 	f.conn.List("-a")
 
@@ -284,7 +290,6 @@ func (f *FTPConnection) ListFiles(dirPath string) ([]USSFile, error) {
 }
 
 func parseUSSListFromDebug(debug string) ([]USSFile, error) {
-	// Find list data between start/end markers
 	startIdx := -1
 	for _, marker := range []string{"150 Opening", "125 List started"} {
 		if idx := strings.Index(debug, marker); idx != -1 {

@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"path"
 	"regexp"
 	"strconv"
@@ -102,21 +104,24 @@ func runGrep(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+
 	totalMatches := 0
 
 	if strings.HasPrefix(target, "/") {
-		return grepUSS(cmd, conn, target, pattern, matcher)
+		return grepUSS(cmd, conn, target, pattern, matcher, w)
 	}
 
 	// Wildcard dataset pattern (e.g. FALZONE.*) → resolve datasets first
 	if strings.Contains(target, "*") {
-		return grepDatasetPattern(cmd, conn, target, pattern, matcher, &totalMatches)
+		return grepDatasetPattern(cmd, conn, target, pattern, matcher, &totalMatches, w)
 	}
 
-	return grepPDS(cmd, conn, target, pattern, matcher, &totalMatches)
+	return grepPDS(cmd, conn, target, pattern, matcher, &totalMatches, w)
 }
 
-func grepDatasetPattern(cmd *cobra.Command, conn connection.Connection, dsPattern, pattern string, matcher func(string) bool, totalMatches *int) error {
+func grepDatasetPattern(cmd *cobra.Command, conn connection.Connection, dsPattern, pattern string, matcher func(string) bool, totalMatches *int, w *bufio.Writer) error {
 	datasets, err := conn.ListDatasets(dsPattern)
 	if err != nil {
 		return err
@@ -126,14 +131,14 @@ func grepDatasetPattern(cmd *cobra.Command, conn connection.Connection, dsPatter
 		if grepMax > 0 && *totalMatches >= grepMax {
 			break
 		}
-		if err := grepPDS(cmd, conn, ds, pattern, matcher, totalMatches); err != nil {
+		if err := grepPDS(cmd, conn, ds, pattern, matcher, totalMatches, w); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "skipping %s (not a PDS)\n", ds)
 		}
 	}
 	return nil
 }
 
-func grepPDS(cmd *cobra.Command, conn connection.Connection, dataset, pattern string, matcher func(string) bool, totalMatches *int) error {
+func grepPDS(cmd *cobra.Command, conn connection.Connection, dataset, pattern string, matcher func(string) bool, totalMatches *int, w *bufio.Writer) error {
 	members, err := conn.ListMembers(dataset)
 	if err != nil {
 		return err
@@ -145,13 +150,13 @@ func grepPDS(cmd *cobra.Command, conn connection.Connection, dataset, pattern st
 
 	// Use parallel reads when connection supports it (z/OSMF)
 	if cc, ok := conn.(connection.ConcurrentConnection); ok {
-		return grepPDSParallel(cmd, conn, dataset, matcher, members, totalMatches, cc.MaxConcurrency())
+		return grepPDSParallel(cmd, conn, dataset, matcher, members, totalMatches, cc.MaxConcurrency(), w)
 	}
 
-	return grepPDSSequential(cmd, conn, dataset, pattern, matcher, members, totalMatches)
+	return grepPDSSequential(cmd, conn, dataset, pattern, matcher, members, totalMatches, w)
 }
 
-func grepPDSSequential(cmd *cobra.Command, conn connection.Connection, dataset, pattern string, matcher func(string) bool, members []connection.Member, totalMatches *int) error {
+func grepPDSSequential(cmd *cobra.Command, conn connection.Connection, dataset, pattern string, matcher func(string) bool, members []connection.Member, totalMatches *int, w *bufio.Writer) error {
 	grepper, hasServerGrep := conn.(ServerGrepper)
 
 	for _, m := range members {
@@ -180,7 +185,7 @@ func grepPDSSequential(cmd *cobra.Command, conn connection.Connection, dataset, 
 
 		displayName := fmt.Sprintf("%s(%s)", dataset, m.Name)
 		var printErr error
-		*totalMatches, printErr = printMatches(matches, displayName, *totalMatches)
+		*totalMatches, printErr = printMatches(w, matches, displayName, *totalMatches)
 		if printErr != nil {
 			return printErr
 		}
@@ -194,7 +199,7 @@ type memberContent struct {
 	err     error
 }
 
-func grepPDSParallel(cmd *cobra.Command, conn connection.Connection, dataset string, matcher func(string) bool, members []connection.Member, totalMatches *int, concurrency int) error {
+func grepPDSParallel(cmd *cobra.Command, conn connection.Connection, dataset string, matcher func(string) bool, members []connection.Member, totalMatches *int, concurrency int, w *bufio.Writer) error {
 	// Pre-fetch all member contents in parallel
 	results := make([]memberContent, len(members))
 	sem := make(chan struct{}, concurrency)
@@ -226,7 +231,7 @@ func grepPDSParallel(cmd *cobra.Command, conn connection.Connection, dataset str
 		matches := searchLines(string(results[i].content), matcher)
 		displayName := fmt.Sprintf("%s(%s)", dataset, m.Name)
 		var printErr error
-		*totalMatches, printErr = printMatches(matches, displayName, *totalMatches)
+		*totalMatches, printErr = printMatches(w, matches, displayName, *totalMatches)
 		if printErr != nil {
 			return printErr
 		}
@@ -235,12 +240,12 @@ func grepPDSParallel(cmd *cobra.Command, conn connection.Connection, dataset str
 	return nil
 }
 
-func grepUSS(cmd *cobra.Command, conn connection.Connection, dirPath, pattern string, matcher func(string) bool) error {
+func grepUSS(cmd *cobra.Command, conn connection.Connection, dirPath, pattern string, matcher func(string) bool, w *bufio.Writer) error {
 	totalMatches := 0
-	return grepUSSRecursive(cmd, conn, dirPath, dirPath, matcher, &totalMatches)
+	return grepUSSRecursive(cmd, conn, dirPath, dirPath, matcher, &totalMatches, w)
 }
 
-func grepUSSRecursive(cmd *cobra.Command, conn connection.Connection, basePath, dirPath string, matcher func(string) bool, totalMatches *int) error {
+func grepUSSRecursive(cmd *cobra.Command, conn connection.Connection, basePath, dirPath string, matcher func(string) bool, totalMatches *int, w *bufio.Writer) error {
 	if grepMax > 0 && *totalMatches >= grepMax {
 		return nil
 	}
@@ -259,7 +264,7 @@ func grepUSSRecursive(cmd *cobra.Command, conn connection.Connection, basePath, 
 		filePath := path.Join(dirPath, f.Name)
 
 		if f.Type == "directory" {
-			if err := grepUSSRecursive(cmd, conn, basePath, filePath, matcher, totalMatches); err != nil {
+			if err := grepUSSRecursive(cmd, conn, basePath, filePath, matcher, totalMatches, w); err != nil {
 				return err
 			}
 			continue
@@ -287,7 +292,7 @@ func grepUSSRecursive(cmd *cobra.Command, conn connection.Connection, basePath, 
 
 		matches := searchLines(string(content), matcher)
 		var printErr error
-		*totalMatches, printErr = printMatches(matches, displayPath, *totalMatches)
+		*totalMatches, printErr = printMatches(w, matches, displayPath, *totalMatches)
 		if printErr != nil {
 			return printErr
 		}
@@ -296,15 +301,15 @@ func grepUSSRecursive(cmd *cobra.Command, conn connection.Connection, basePath, 
 	return nil
 }
 
-func printMatches(matches []grepMatch, name string, totalMatches int) (int, error) {
+func printMatches(w *bufio.Writer, matches []grepMatch, name string, totalMatches int) (int, error) {
 	for _, match := range matches {
 		if grepMax > 0 && totalMatches >= grepMax {
 			break
 		}
 		if grepLineNumbers {
-			fmt.Printf("%s:%d:%s\n", name, match.Line, match.Text)
+			fmt.Fprintf(w, "%s:%d:%s\n", name, match.Line, match.Text)
 		} else {
-			fmt.Printf("%s:%s\n", name, match.Text)
+			fmt.Fprintf(w, "%s:%s\n", name, match.Text)
 		}
 		totalMatches++
 	}

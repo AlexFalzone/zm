@@ -26,7 +26,33 @@ type Hunk struct {
 
 // Diff computes a unified diff between linesA and linesB with the given context lines.
 func Diff(linesA, linesB []string, context int) []Hunk {
-	ops := lcs(linesA, linesB)
+	// Trim equal prefix
+	prefix := 0
+	for prefix < len(linesA) && prefix < len(linesB) && linesA[prefix] == linesB[prefix] {
+		prefix++
+	}
+	// Trim equal suffix
+	suffix := 0
+	for suffix < len(linesA)-prefix && suffix < len(linesB)-prefix &&
+		linesA[len(linesA)-1-suffix] == linesB[len(linesB)-1-suffix] {
+		suffix++
+	}
+
+	midA := linesA[prefix : len(linesA)-suffix]
+	midB := linesB[prefix : len(linesB)-suffix]
+
+	midOps := lcs(midA, midB)
+
+	// Reconstruct full ops: prefix(Equal) + midOps + suffix(Equal)
+	ops := make([]DiffLine, 0, prefix+len(midOps)+suffix)
+	for i := 0; i < prefix; i++ {
+		ops = append(ops, DiffLine{Op: OpEqual, Text: linesA[i]})
+	}
+	ops = append(ops, midOps...)
+	for i := len(linesA) - suffix; i < len(linesA); i++ {
+		ops = append(ops, DiffLine{Op: OpEqual, Text: linesA[i]})
+	}
+
 	return buildHunks(ops, context)
 }
 
