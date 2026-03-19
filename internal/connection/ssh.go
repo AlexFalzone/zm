@@ -544,11 +544,17 @@ func parseStatusOutput(output, owner string) []JobStatus {
 }
 
 func (s *SSHConnection) GetJobStatus(jobid string) (*JobStatus, error) {
-	jobs, err := s.ListJobs("")
-	if err != nil {
+	if err := validateDSN(jobid); err != nil {
 		return nil, err
 	}
 
+	// Query specific job directly instead of listing all jobs
+	out, err := s.exec(fmt.Sprintf(`tsocmd "STATUS %s" 2>/dev/null`, jobid))
+	if err != nil {
+		return nil, fmt.Errorf("job %s not found: %w", jobid, err)
+	}
+
+	jobs := parseStatusOutput(out, strings.ToUpper(s.user))
 	for _, job := range jobs {
 		if job.JobID == jobid {
 			return &job, nil
@@ -592,6 +598,43 @@ func (s *SSHConnection) PurgeJob(jobid string) error {
 		return fmt.Errorf("failed to purge job %s: %w", jobid, err)
 	}
 	return nil
+}
+
+func shellEscape(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func (s *SSHConnection) GrepMember(dataset, member, pattern string, caseInsensitive bool) ([]byte, error) {
+	dsn := strings.Trim(dataset, "'")
+	if err := validateDSN(dsn); err != nil {
+		return nil, err
+	}
+	if err := validateDSN(member); err != nil {
+		return nil, err
+	}
+
+	flags := "-n"
+	if caseInsensitive {
+		flags += " -i"
+	}
+
+	cmd := fmt.Sprintf("grep %s %s \"//'%s(%s)'\"", flags, shellEscape(pattern), dsn, member)
+	session, err := s.client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SSH session: %w", err)
+	}
+	defer session.Close()
+
+	out, err := session.CombinedOutput(cmd)
+	if err != nil {
+		// grep exit code 1 = no matches, not an error
+		if len(out) == 0 {
+			return nil, nil
+		}
+		// If we got output despite the error, it's likely just exit code 1 with partial output
+		return out, nil
+	}
+	return out, nil
 }
 
 var _ Connection = (*SSHConnection)(nil)

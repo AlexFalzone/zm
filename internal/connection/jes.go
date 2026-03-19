@@ -74,6 +74,22 @@ func (c *jesClient) listJobs() ([]JobStatus, error) {
 	return parseJobLines(lines), nil
 }
 
+func (c *jesClient) getJobStatus(jobid string) (*JobStatus, error) {
+	if strings.ContainsAny(jobid, "\r\n") {
+		return nil, fmt.Errorf("invalid jobid: contains control characters")
+	}
+	// LIST with jobid arg filters server-side — avoids fetching all jobs
+	lines, err := c.retrData("LIST", jobid)
+	if err != nil {
+		return nil, fmt.Errorf("job %s not found: %w", jobid, err)
+	}
+	jobs := parseJobLines(lines)
+	if len(jobs) == 0 {
+		return nil, fmt.Errorf("job %s not found", jobid)
+	}
+	return &jobs[0], nil
+}
+
 func (c *jesClient) submitJCL(jcl []byte) (string, error) {
 	if err := c.cmd("TYPE A"); err != nil {
 		return "", fmt.Errorf("failed to set ASCII mode: %w", err)

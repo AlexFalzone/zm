@@ -142,30 +142,28 @@ func (f *FTPConnection) ListMembers(dataset string) ([]Member, error) {
 }
 
 func (f *FTPConnection) parseMemberListFromDebug(debug string) ([]Member, error) {
-	lines := strings.Split(debug, "\n")
-	members := make([]Member, 0, len(lines)/2)
+	// Find list boundaries to avoid scanning the entire debug buffer
+	startMarker := "125 List started"
+	endMarker := "250 List completed"
 
-	inList := false
+	startIdx := strings.Index(debug, startMarker)
+	if startIdx == -1 {
+		return nil, nil
+	}
+	startIdx += len(startMarker)
+
+	endIdx := strings.Index(debug[startIdx:], endMarker)
+	if endIdx == -1 {
+		endIdx = len(debug) - startIdx
+	}
+	listData := debug[startIdx : startIdx+endIdx]
+
+	lines := strings.Split(listData, "\n")
+	members := make([]Member, 0, len(lines))
+
 	for _, line := range lines {
-		// Look for lines after "125 List started" until "250 List completed"
-		if strings.Contains(line, "125 List started") {
-			inList = true
-			continue
-		}
-		if strings.Contains(line, "250 List completed") {
-			break
-		}
-		if !inList {
-			continue
-		}
-
-		// Skip header line
-		if strings.Contains(line, "Name") && strings.Contains(line, "VV.MM") {
-			continue
-		}
-
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || (strings.Contains(line, "Name") && strings.Contains(line, "VV.MM")) {
 			continue
 		}
 
@@ -286,37 +284,44 @@ func (f *FTPConnection) ListFiles(dirPath string) ([]USSFile, error) {
 }
 
 func parseUSSListFromDebug(debug string) ([]USSFile, error) {
-	lines := strings.Split(debug, "\n")
-	files := make([]USSFile, 0, len(lines)/2)
-
-	inList := false
-	for _, line := range lines {
-		if strings.Contains(line, "125 List started") || strings.Contains(line, "150 Opening") {
-			inList = true
-			continue
-		}
-		if strings.Contains(line, "250 List completed") || strings.Contains(line, "226 Transfer") {
+	// Find list data between start/end markers
+	startIdx := -1
+	for _, marker := range []string{"150 Opening", "125 List started"} {
+		if idx := strings.Index(debug, marker); idx != -1 {
+			startIdx = idx + len(marker)
 			break
 		}
-		if !inList {
-			continue
-		}
+	}
+	if startIdx == -1 {
+		return nil, nil
+	}
 
+	endIdx := len(debug)
+	for _, marker := range []string{"250 List completed", "226 Transfer"} {
+		if idx := strings.Index(debug[startIdx:], marker); idx != -1 {
+			if startIdx+idx < endIdx {
+				endIdx = startIdx + idx
+			}
+			break
+		}
+	}
+	listData := debug[startIdx:endIdx]
+
+	lines := strings.Split(listData, "\n")
+	files := make([]USSFile, 0, len(lines))
+
+	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "total ") {
 			continue
 		}
 
-		// Full format: drwxr-xr-x  2 USER GROUP 8192 Mar 12 10:20 name
-		// Name-only format: .bashrc
 		f := parseUSSLine(line)
 		if f.Name == "" {
-			// Name-only format (LIST -a on z/OS returns plain names)
-			name := line
-			if name == "." || name == ".." {
+			if line == "." || line == ".." {
 				continue
 			}
-			f = USSFile{Name: name, Type: "file"}
+			f = USSFile{Name: line, Type: "file"}
 		}
 		if f.Name != "." && f.Name != ".." {
 			files = append(files, f)
@@ -351,18 +356,11 @@ func (f *FTPConnection) SubmitJCL(jcl []byte) (string, error) {
 }
 
 func (f *FTPConnection) GetJobStatus(jobid string) (*JobStatus, error) {
-	jobs, err := f.ListJobs("")
+	jes, err := f.getJES()
 	if err != nil {
 		return nil, err
 	}
-
-	for _, job := range jobs {
-		if job.JobID == jobid {
-			return &job, nil
-		}
-	}
-
-	return nil, fmt.Errorf("job %s not found", jobid)
+	return jes.getJobStatus(jobid)
 }
 
 func (f *FTPConnection) ListJobs(owner string) ([]JobStatus, error) {

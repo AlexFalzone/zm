@@ -31,6 +31,11 @@ type USSFile struct {
 	Mtime string
 }
 
+// ConcurrentConnection signals that the connection supports parallel read operations.
+type ConcurrentConnection interface {
+	MaxConcurrency() int
+}
+
 // Connection is implemented by all transport protocols (FTP, SFTP, future z/OSMF)
 type Connection interface {
 	Connect() error

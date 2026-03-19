@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -13,14 +14,16 @@ import (
 )
 
 var (
-	jobsOwner  string
-	jobsOutput bool
-	jobsCancel bool
-	jobsPurge  bool
-	jobsTail   bool
-	jobsDD     string
-	jobsStatus string
-	jobsLimit  int
+	jobsOwner   string
+	jobsOutput  bool
+	jobsCancel  bool
+	jobsPurge   bool
+	jobsTail    bool
+	jobsDD      string
+	jobsStatus  string
+	jobsLimit   int
+	jobsSort    string
+	jobsReverse bool
 )
 
 var jobsCmd = &cobra.Command{
@@ -40,6 +43,8 @@ func init() {
 	jobsCmd.Flags().StringVar(&jobsDD, "dd", "", "filter output by DD name (requires --output)")
 	jobsCmd.Flags().StringVar(&jobsStatus, "status", "", "filter job list by status (ACTIVE, OUTPUT, INPUT)")
 	jobsCmd.Flags().IntVar(&jobsLimit, "limit", 0, "limit number of results")
+	jobsCmd.Flags().StringVar(&jobsSort, "sort", "jobid", "sort jobs by: jobid, jobname, owner, status, rc")
+	jobsCmd.Flags().BoolVarP(&jobsReverse, "reverse", "r", false, "reverse sort order")
 }
 
 func runJobs(cmd *cobra.Command, args []string) error {
@@ -144,6 +149,14 @@ func runJobs(cmd *cobra.Command, args []string) error {
 		jobs = filtered
 	}
 
+	sortJobs(jobs, jobsSort)
+
+	if jobsReverse {
+		for i, j := 0, len(jobs)-1; i < j; i, j = i+1, j-1 {
+			jobs[i], jobs[j] = jobs[j], jobs[i]
+		}
+	}
+
 	if jobsLimit > 0 && len(jobs) > jobsLimit {
 		jobs = jobs[:jobsLimit]
 	}
@@ -224,6 +237,31 @@ func printJobList(jobs []connection.JobStatus) {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", j.JobName, j.JobID, j.Owner, j.Status, j.RetCode)
 	}
 	w.Flush()
+}
+
+func sortJobs(jobs []connection.JobStatus, field string) {
+	switch strings.ToLower(field) {
+	case "jobname":
+		sort.Slice(jobs, func(i, j int) bool {
+			return jobs[i].JobName < jobs[j].JobName
+		})
+	case "owner":
+		sort.Slice(jobs, func(i, j int) bool {
+			return jobs[i].Owner < jobs[j].Owner
+		})
+	case "status":
+		sort.Slice(jobs, func(i, j int) bool {
+			return jobs[i].Status < jobs[j].Status
+		})
+	case "rc":
+		sort.Slice(jobs, func(i, j int) bool {
+			return jobs[i].RetCode < jobs[j].RetCode
+		})
+	default: // "jobid"
+		sort.Slice(jobs, func(i, j int) bool {
+			return jobs[i].JobID < jobs[j].JobID
+		})
+	}
 }
 
 func printJobDetail(job *connection.JobStatus) {

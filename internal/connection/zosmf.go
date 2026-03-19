@@ -539,4 +539,7 @@ func (z *ZOSMFConnection) PurgeJob(jobid string) error {
 	return nil
 }
 
+func (z *ZOSMFConnection) MaxConcurrency() int { return 5 }
+
 var _ Connection = (*ZOSMFConnection)(nil)
+var _ ConcurrentConnection = (*ZOSMFConnection)(nil)
