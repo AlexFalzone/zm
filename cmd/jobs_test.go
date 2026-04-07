@@ -28,22 +28,22 @@ func TestSortJobs(t *testing.T) {
 		{
 			name:  "sort by jobname",
 			field: "jobname",
-			want:  []string{"JOB00001", "JOB00002", "JOB00003"}, // ASSEMBLE, BIND, COMPILE
+			want:  []string{"JOB00001", "JOB00002", "JOB00003"},
 		},
 		{
 			name:  "sort by owner",
 			field: "owner",
-			want:  []string{"JOB00001", "JOB00002", "JOB00003"}, // FALZONE, JONES, SMITH
+			want:  []string{"JOB00001", "JOB00002", "JOB00003"},
 		},
 		{
 			name:  "sort by status",
 			field: "status",
-			want:  []string{"JOB00001", "JOB00002", "JOB00003"}, // ACTIVE, INPUT, OUTPUT
+			want:  []string{"JOB00001", "JOB00002", "JOB00003"},
 		},
 		{
 			name:  "sort by rc",
 			field: "rc",
-			want:  []string{"JOB00001", "JOB00002", "JOB00003"}, // "", CC 0000, CC 0004
+			want:  []string{"JOB00001", "JOB00002", "JOB00003"},
 		},
 	}
 

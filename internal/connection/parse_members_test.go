@@ -12,7 +12,7 @@ func TestParseMemberLine(t *testing.T) {
 	}{
 		{
 			name: "standard line",
-			line: "HSISAPIE  01.82 2024/04/16 2025/12/10 20:18     5    27     0 FALZONE",
+			line: "HSISAPIE  01.82 2024/04/16 2025/12/10 20:18     5    27     0 USER",
 			expected: Member{
 				Name:    "HSISAPIE",
 				VV:      1,
@@ -22,7 +22,7 @@ func TestParseMemberLine(t *testing.T) {
 				Size:    5,
 				Init:    27,
 				Mod:     0,
-				User:    "FALZONE",
+				User:    "USER",
 			},
 		},
 		{
@@ -70,7 +70,7 @@ func TestParseListMembersOutput(t *testing.T) {
 	}{
 		{
 			name: "standard output with members",
-			output: `FALZONE.SOURCE
+			output: `USER.SOURCE
 --RECFM-LRECL-BLKSIZE-DSORG
 FB    80    27920   PO
 --MEMBERS--
@@ -82,7 +82,7 @@ READY`,
 		},
 		{
 			name: "empty members",
-			output: `FALZONE.EMPTY
+			output: `USER.EMPTY
 --RECFM-LRECL-BLKSIZE-DSORG
 FB    80    27920   PO
 --MEMBERS--
@@ -91,7 +91,7 @@ READY`,
 		},
 		{
 			name:   "no members section",
-			output: "FALZONE.SEQ\nREADY\n",
+			output: "USER.SEQ\nREADY\n",
 			want:   nil,
 		},
 	}

@@ -2,6 +2,7 @@ package connection
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"zm/internal/retry"
+	"zm/internal/validate"
 
 	"github.com/jlaffaye/ftp"
 )
@@ -44,7 +46,11 @@ func (f *FTPConnection) Connect() error {
 
 func (f *FTPConnection) ensureMainConn() error {
 	if f.conn != nil {
-		return nil
+		if err := f.conn.NoOp(); err == nil {
+			return nil
+		}
+		f.conn.Quit()
+		f.conn = nil
 	}
 	return retry.Do(retry.Config{
 		Attempts: f.retryAttempts,
@@ -64,6 +70,7 @@ func (f *FTPConnection) dialMainConn() error {
 		conn.Quit()
 		return fmt.Errorf("login failed: %w", err)
 	}
+	f.debugBuf.Reset()
 	if err := conn.Type(ftp.TransferTypeASCII); err != nil {
 		conn.Quit()
 		return fmt.Errorf("failed to set ASCII mode: %w", err)
@@ -73,6 +80,7 @@ func (f *FTPConnection) dialMainConn() error {
 }
 
 func (f *FTPConnection) Close() error {
+	var errs []error
 	if f.jes != nil {
 		f.jes.close()
 		f.jes = nil
@@ -83,16 +91,20 @@ func (f *FTPConnection) Close() error {
 	}
 	if f.conn != nil {
 		if err := f.conn.Quit(); err != nil {
-			return fmt.Errorf("failed to close connection: %w", err)
+			errs = append(errs, fmt.Errorf("failed to close main connection: %w", err))
 		}
 		f.conn = nil
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (f *FTPConnection) getJES() (*jesClient, error) {
 	if f.jes != nil {
-		return f.jes, nil
+		if err := f.jes.noop(); err == nil {
+			return f.jes, nil
+		}
+		f.jes.close()
+		f.jes = nil
 	}
 	jes, err := newJESClient(f.host, f.port, f.user, f.password)
 	if err != nil {
@@ -108,7 +120,11 @@ func (f *FTPConnection) getJES() (*jesClient, error) {
 
 func (f *FTPConnection) getUSS() (*ussClient, error) {
 	if f.uss != nil {
-		return f.uss, nil
+		if err := f.uss.noop(); err == nil {
+			return f.uss, nil
+		}
+		f.uss.close()
+		f.uss = nil
 	}
 	uss, err := newUSSClient(f.host, f.port, f.user, f.password)
 	if err != nil {
@@ -119,6 +135,9 @@ func (f *FTPConnection) getUSS() (*ussClient, error) {
 }
 
 func (f *FTPConnection) ListDatasets(pattern string) ([]string, error) {
+	if err := validate.DSN(pattern); err != nil {
+		return nil, err
+	}
 	if err := f.ensureMainConn(); err != nil {
 		return nil, err
 	}
@@ -141,11 +160,13 @@ func (f *FTPConnection) ListDatasets(pattern string) ([]string, error) {
 }
 
 func (f *FTPConnection) ListMembers(dataset string) ([]Member, error) {
+	dsn := strings.Trim(dataset, "'")
+	if err := validate.DSN(dsn); err != nil {
+		return nil, err
+	}
 	if err := f.ensureMainConn(); err != nil {
 		return nil, err
 	}
-
-	dsn := strings.Trim(dataset, "'")
 
 	// Reset debug buffer and capture only this LIST operation
 	f.debugBuf.Reset()
@@ -155,14 +176,24 @@ func (f *FTPConnection) ListMembers(dataset string) ([]Member, error) {
 		return nil, fmt.Errorf("failed to access dataset %s: %w", dsn, err)
 	}
 
-	// Call List - it will fail to parse but debug output will have the raw data
-	f.conn.List("")
+	// Call List — may fail to parse structured response, but debug output has raw data
+	if _, err := f.conn.List(""); err != nil {
+		// List often returns a parse error on z/OS; only fail if debug buffer is also empty
+		if f.debugBuf.Len() == 0 {
+			return nil, fmt.Errorf("failed to list members of %s: %w", dsn, err)
+		}
+	}
 
-	// Parse the debug output to extract member info
 	return parseMemberListFromDebug(f.debugBuf.String())
 }
 
 func (f *FTPConnection) ReadMember(dataset, member string) ([]byte, error) {
+	if err := validate.DSN(strings.Trim(dataset, "'")); err != nil {
+		return nil, err
+	}
+	if err := validate.DSN(member); err != nil {
+		return nil, err
+	}
 	if err := f.ensureMainConn(); err != nil {
 		return nil, err
 	}
@@ -183,6 +214,12 @@ func (f *FTPConnection) ReadMember(dataset, member string) ([]byte, error) {
 }
 
 func (f *FTPConnection) WriteMember(dataset, member string, content []byte) error {
+	if err := validate.DSN(strings.Trim(dataset, "'")); err != nil {
+		return err
+	}
+	if err := validate.DSN(member); err != nil {
+		return err
+	}
 	if err := f.ensureMainConn(); err != nil {
 		return err
 	}
@@ -196,6 +233,9 @@ func (f *FTPConnection) WriteMember(dataset, member string, content []byte) erro
 
 func (f *FTPConnection) ListFiles(dirPath string) ([]USSFile, error) {
 	if strings.HasPrefix(dirPath, "/") {
+		if err := validate.USSPath(dirPath); err != nil {
+			return nil, err
+		}
 		uss, err := f.getUSS()
 		if err != nil {
 			return nil, err
@@ -215,15 +255,19 @@ func (f *FTPConnection) ListFiles(dirPath string) ([]USSFile, error) {
 	f.debugBuf.Reset()
 	f.conn.List("")
 
-	files, _ := parseUSSListFromDebug(f.debugBuf.String())
-	if len(files) > 0 {
+	files, err := parseUSSListFromDebug(f.debugBuf.String())
+	if err == nil && len(files) > 0 {
 		return files, nil
 	}
 
 	f.debugBuf.Reset()
 	f.conn.List("-a")
 
-	return parseUSSListFromDebug(f.debugBuf.String())
+	files, err = parseUSSListFromDebug(f.debugBuf.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list %s: %w", dirPath, err)
+	}
+	return files, nil
 }
 
 func (f *FTPConnection) ReadFile(path string) ([]byte, error) {

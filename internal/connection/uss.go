@@ -6,6 +6,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+
+	"zm/internal/validate"
 )
 
 type ussClient struct {
@@ -55,8 +57,8 @@ func newUSSClient(host string, port int, user, password string) (*ussClient, err
 }
 
 func (c *ussClient) listFiles(dirPath string) ([]USSFile, error) {
-	if strings.ContainsAny(dirPath, "\r\n") {
-		return nil, fmt.Errorf("invalid path: contains control characters")
+	if err := validate.USSPath(dirPath); err != nil {
+		return nil, err
 	}
 
 	if err := c.cmd("CWD %s", dirPath); err != nil {
@@ -79,8 +81,8 @@ func (c *ussClient) listFiles(dirPath string) ([]USSFile, error) {
 }
 
 func (c *ussClient) readFile(path string) ([]byte, error) {
-	if strings.ContainsAny(path, "\r\n") {
-		return nil, fmt.Errorf("invalid path: contains control characters")
+	if err := validate.USSPath(path); err != nil {
+		return nil, err
 	}
 
 	lines, err := c.retrData("RETR", path)
@@ -91,8 +93,8 @@ func (c *ussClient) readFile(path string) ([]byte, error) {
 }
 
 func (c *ussClient) writeFile(path string, content []byte) error {
-	if strings.ContainsAny(path, "\r\n") {
-		return fmt.Errorf("invalid path: contains control characters")
+	if err := validate.USSPath(path); err != nil {
+		return err
 	}
 
 	_, err := c.storData(fmt.Sprintf("STOR %s", path), content)

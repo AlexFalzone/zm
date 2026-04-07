@@ -17,6 +17,7 @@ import (
 
 	"zm/internal/ebcdic"
 	"zm/internal/retry"
+	"zm/internal/validate"
 )
 
 type ZOSMFConnection struct {
@@ -25,7 +26,7 @@ type ZOSMFConnection struct {
 	user          string
 	password      string
 	encoding      string
-	tlsVerify     bool
+	tlsSkipVerify bool
 	caCertPath    string
 	retryAttempts int
 	retryDelay    time.Duration
@@ -48,7 +49,7 @@ func (z *ZOSMFConnection) Connect() error {
 	z.baseURL = fmt.Sprintf("https://%s:%d", z.host, z.port)
 
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: !z.tlsVerify,
+		InsecureSkipVerify: z.tlsSkipVerify,
 	}
 	if z.caCertPath != "" {
 		caCert, err := os.ReadFile(z.caCertPath)
@@ -201,7 +202,10 @@ type memberListResponse struct {
 
 func (z *ZOSMFConnection) ListMembers(dataset string) ([]Member, error) {
 	dsn := strings.Trim(dataset, "'")
-	path := fmt.Sprintf("/zosmf/restfiles/ds/%s/member", dsn)
+	if err := validate.DSN(dsn); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/zosmf/restfiles/ds/%s/member", url.PathEscape(dsn))
 	resp, err := z.doRequest("GET", path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list members: %w", err)
@@ -240,7 +244,13 @@ func (z *ZOSMFConnection) ListMembers(dataset string) ([]Member, error) {
 
 func (z *ZOSMFConnection) ReadMember(dataset, member string) ([]byte, error) {
 	dsn := strings.Trim(dataset, "'")
-	path := fmt.Sprintf("/zosmf/restfiles/ds/%s(%s)", dsn, member)
+	if err := validate.DSN(dsn); err != nil {
+		return nil, err
+	}
+	if err := validate.DSN(member); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/zosmf/restfiles/ds/%s(%s)", url.PathEscape(dsn), url.PathEscape(member))
 	resp, err := z.doRequest("GET", path, nil, "X-IBM-Data-Type", "text")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s(%s): %w", dsn, member, err)
@@ -255,7 +265,13 @@ func (z *ZOSMFConnection) ReadMember(dataset, member string) ([]byte, error) {
 
 func (z *ZOSMFConnection) WriteMember(dataset, member string, content []byte) error {
 	dsn := strings.Trim(dataset, "'")
-	path := fmt.Sprintf("/zosmf/restfiles/ds/%s(%s)", dsn, member)
+	if err := validate.DSN(dsn); err != nil {
+		return err
+	}
+	if err := validate.DSN(member); err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/zosmf/restfiles/ds/%s(%s)", url.PathEscape(dsn), url.PathEscape(member))
 	resp, err := z.doRequest("PUT", path, bytes.NewReader(content),
 		"X-IBM-Data-Type", "text", "Content-Type", "text/plain")
 	if err != nil {
@@ -285,6 +301,9 @@ type ussListResponse struct {
 }
 
 func (z *ZOSMFConnection) ListFiles(dirPath string) ([]USSFile, error) {
+	if err := validate.USSPath(dirPath); err != nil {
+		return nil, err
+	}
 	dirPath = strings.TrimRight(dirPath, "/")
 	apiPath := "/zosmf/restfiles/fs?path=" + dirPath
 	resp, err := z.doRequest("GET", apiPath, nil)
@@ -335,6 +354,9 @@ func ussTypeFromMode(mode string) string {
 }
 
 func (z *ZOSMFConnection) ReadFile(path string) ([]byte, error) {
+	if err := validate.USSPath(path); err != nil {
+		return nil, err
+	}
 	ussPath := "/zosmf/restfiles/fs" + path
 	resp, err := z.doRequest("GET", ussPath, nil, "X-IBM-Data-Type", "binary")
 	if err != nil {
@@ -356,6 +378,9 @@ func (z *ZOSMFConnection) ReadFile(path string) ([]byte, error) {
 }
 
 func (z *ZOSMFConnection) WriteFile(path string, content []byte) error {
+	if err := validate.USSPath(path); err != nil {
+		return err
+	}
 	ussPath := "/zosmf/restfiles/fs" + path
 	resp, err := z.doRequest("PUT", ussPath, bytes.NewReader(content),
 		"X-IBM-Data-Type", "binary", "Content-Type", "application/octet-stream")
@@ -407,6 +432,9 @@ func (z *ZOSMFConnection) ListJobs(owner string) ([]JobStatus, error) {
 	if owner == "" {
 		owner = z.user
 	}
+	if err := validate.Owner(owner); err != nil {
+		return nil, err
+	}
 	path := "/zosmf/restjobs/jobs?owner=" + url.QueryEscape(owner) + "&prefix=*"
 	resp, err := z.doRequest("GET", path, nil)
 	if err != nil {
@@ -441,6 +469,9 @@ func parseZOSMFJobs(items []jobsListResponse) []JobStatus {
 }
 
 func (z *ZOSMFConnection) GetJobStatus(jobid string) (*JobStatus, error) {
+	if err := validate.JobID(jobid); err != nil {
+		return nil, err
+	}
 	path := "/zosmf/restjobs/jobs?owner=*&jobid=" + url.QueryEscape(jobid)
 	resp, err := z.doRequest("GET", path, nil)
 	if err != nil {
@@ -512,12 +543,15 @@ func (z *ZOSMFConnection) GetJobOutput(jobid string) ([]byte, error) {
 	}
 
 	results := make([]spoolResult, len(files))
+	sem := make(chan struct{}, z.MaxConcurrency())
 	var wg sync.WaitGroup
 
 	for i, file := range files {
 		wg.Add(1)
 		go func(idx int, f jobFileResponse) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			recordsPath := fmt.Sprintf("/zosmf/restjobs/jobs/%s/%s/files/%d/records",
 				status.JobName, jobid, f.ID)
 			recResp, err := z.doRequest("GET", recordsPath, nil, "X-IBM-Data-Type", "text")

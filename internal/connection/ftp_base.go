@@ -19,6 +19,10 @@ func (c *ftpBase) close() {
 	c.conn.Close()
 }
 
+func (c *ftpBase) noop() error {
+	return c.cmd("NOOP")
+}
+
 func (c *ftpBase) cmd(format string, args ...interface{}) error {
 	_, err := c.cmdResp(format, args...)
 	return err

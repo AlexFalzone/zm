@@ -7,7 +7,7 @@ import (
 
 func parseMemberLine(line string) Member {
 	// Format: Name     VV.MM   Created       Changed      Size  Init   Mod   Id
-	// Example: HSISAPIE  01.82 2024/04/16 2025/12/10 20:18     5    27     0 FALZONE
+	// Example: HSISAPIE  01.82 2024/04/16 2025/12/10 20:18     5    27     0 USER
 	fields := strings.Fields(line)
 	if len(fields) < 8 {
 		return Member{}

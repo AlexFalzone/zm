@@ -6,6 +6,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+
+	"zm/internal/validate"
 )
 
 type jesClient struct {
@@ -52,8 +54,8 @@ func newJESClient(host string, port int, user, password string) (*jesClient, err
 }
 
 func (c *jesClient) setOwner(owner string) error {
-	if strings.ContainsAny(owner, "\r\n") {
-		return fmt.Errorf("invalid owner: contains control characters")
+	if err := validate.Owner(owner); err != nil {
+		return err
 	}
 	if err := c.cmd("SITE JESOWNER=%s", owner); err != nil {
 		return err
@@ -70,8 +72,8 @@ func (c *jesClient) listJobs() ([]JobStatus, error) {
 }
 
 func (c *jesClient) getJobStatus(jobid string) (*JobStatus, error) {
-	if strings.ContainsAny(jobid, "\r\n") {
-		return nil, fmt.Errorf("invalid jobid: contains control characters")
+	if err := validate.JobID(jobid); err != nil {
+		return nil, err
 	}
 	// LIST with jobid arg filters server-side — avoids fetching all jobs
 	lines, err := c.retrData("LIST", jobid)
@@ -112,15 +114,15 @@ func (c *jesClient) submitJCL(jcl []byte) (string, error) {
 }
 
 func (c *jesClient) purgeJob(jobid string) error {
-	if strings.ContainsAny(jobid, "\r\n") {
-		return fmt.Errorf("invalid jobid: contains control characters")
+	if err := validate.JobID(jobid); err != nil {
+		return err
 	}
 	return c.cmd("DELE %s", jobid)
 }
 
 func (c *jesClient) getJobOutput(jobid string) ([]byte, error) {
-	if strings.ContainsAny(jobid, "\r\n") {
-		return nil, fmt.Errorf("invalid jobid: contains control characters")
+	if err := validate.JobID(jobid); err != nil {
+		return nil, err
 	}
 	if err := c.cmd("TYPE A"); err != nil {
 		return nil, fmt.Errorf("failed to set ASCII mode: %w", err)

@@ -46,27 +46,27 @@ func TestParseUSSLine(t *testing.T) {
 	}{
 		{
 			name: "directory",
-			line: "drwxr-xr-x   2 FALZONE  SYS1        8192 Mar 12 10:20 analyzer",
-			want: USSFile{Name: "analyzer", Type: "directory", Size: 8192, Mode: "drwxr-xr-x", User: "FALZONE", Group: "SYS1", Mtime: "Mar 12 10:20"},
+			line: "drwxr-xr-x   2 USER  SYS1        8192 Mar 12 10:20 analyzer",
+			want: USSFile{Name: "analyzer", Type: "directory", Size: 8192, Mode: "drwxr-xr-x", User: "USER", Group: "SYS1", Mtime: "Mar 12 10:20"},
 		},
 		{
 			name: "regular file",
-			line: "-rw-r--r--   1 FALZONE  SYS1        1884 Mar 12 10:16 Makefile",
-			want: USSFile{Name: "Makefile", Type: "file", Size: 1884, Mode: "-rw-r--r--", User: "FALZONE", Group: "SYS1", Mtime: "Mar 12 10:16"},
+			line: "-rw-r--r--   1 USER  SYS1        1884 Mar 12 10:16 Makefile",
+			want: USSFile{Name: "Makefile", Type: "file", Size: 1884, Mode: "-rw-r--r--", User: "USER", Group: "SYS1", Mtime: "Mar 12 10:16"},
 		},
 		{
 			name: "symlink",
-			line: "lrwxrwxrwx   1 FALZONE  SYS1          15 Jan 20 09:00 link -> target",
-			want: USSFile{Name: "link", Type: "symlink", Size: 15, Mode: "lrwxrwxrwx", User: "FALZONE", Group: "SYS1", Mtime: "Jan 20 09:00"},
+			line: "lrwxrwxrwx   1 USER  SYS1          15 Jan 20 09:00 link -> target",
+			want: USSFile{Name: "link", Type: "symlink", Size: 15, Mode: "lrwxrwxrwx", User: "USER", Group: "SYS1", Mtime: "Jan 20 09:00"},
 		},
 		{
 			name: "filename with space",
-			line: "-rw-r--r--   1 FALZONE  SYS1         100 Jan 20 09:00 my file.txt",
-			want: USSFile{Name: "my file.txt", Type: "file", Size: 100, Mode: "-rw-r--r--", User: "FALZONE", Group: "SYS1", Mtime: "Jan 20 09:00"},
+			line: "-rw-r--r--   1 USER  SYS1         100 Jan 20 09:00 my file.txt",
+			want: USSFile{Name: "my file.txt", Type: "file", Size: 100, Mode: "-rw-r--r--", User: "USER", Group: "SYS1", Mtime: "Jan 20 09:00"},
 		},
 		{
 			name: "too few fields",
-			line: "drwx  2 FALZONE",
+			line: "drwx  2 USER",
 			want: USSFile{},
 		},
 	}

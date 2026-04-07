@@ -13,6 +13,7 @@ import (
 
 	"zm/internal/ebcdic"
 	"zm/internal/retry"
+	"zm/internal/validate"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -218,35 +219,10 @@ func hostKeyCallback() (ssh.HostKeyCallback, error) {
 	}, nil
 }
 
-// --- Input validation ---
-
-func validateDSN(name string) error {
-	for _, c := range name {
-		switch {
-		case c >= 'A' && c <= 'Z':
-		case c >= 'a' && c <= 'z':
-		case c >= '0' && c <= '9':
-		case c == '.' || c == '@' || c == '#' || c == '$' || c == '(' || c == ')' || c == '*':
-		default:
-			return fmt.Errorf("invalid character %q in dataset name", c)
-		}
-	}
-	return nil
-}
-
-func validateUSSPath(path string) error {
-	for _, bad := range []string{";", "$(", "`", "|", "&", ">", "<"} {
-		if strings.Contains(path, bad) {
-			return fmt.Errorf("invalid character sequence %q in USS path", bad)
-		}
-	}
-	return nil
-}
-
 // --- USS operations (via SFTP) ---
 
 func (s *SSHConnection) ListFiles(path string) ([]USSFile, error) {
-	if err := validateUSSPath(path); err != nil {
+	if err := validate.USSPath(path); err != nil {
 		return nil, err
 	}
 
@@ -280,7 +256,7 @@ func (s *SSHConnection) ListFiles(path string) ([]USSFile, error) {
 }
 
 func (s *SSHConnection) ReadFile(path string) ([]byte, error) {
-	if err := validateUSSPath(path); err != nil {
+	if err := validate.USSPath(path); err != nil {
 		return nil, err
 	}
 
@@ -302,7 +278,7 @@ func (s *SSHConnection) ReadFile(path string) ([]byte, error) {
 }
 
 func (s *SSHConnection) WriteFile(path string, content []byte) error {
-	if err := validateUSSPath(path); err != nil {
+	if err := validate.USSPath(path); err != nil {
 		return err
 	}
 
@@ -346,7 +322,7 @@ func (s *SSHConnection) WriteFile(path string, content []byte) error {
 // --- Dataset operations (via SSH exec) ---
 
 func (s *SSHConnection) ListDatasets(pattern string) ([]string, error) {
-	if err := validateDSN(pattern); err != nil {
+	if err := validate.DSN(pattern); err != nil {
 		return nil, err
 	}
 
@@ -364,7 +340,7 @@ func (s *SSHConnection) ListDatasets(pattern string) ([]string, error) {
 
 func (s *SSHConnection) ListMembers(dataset string) ([]Member, error) {
 	dsn := strings.Trim(dataset, "'")
-	if err := validateDSN(dsn); err != nil {
+	if err := validate.DSN(dsn); err != nil {
 		return nil, err
 	}
 
@@ -378,10 +354,10 @@ func (s *SSHConnection) ListMembers(dataset string) ([]Member, error) {
 
 func (s *SSHConnection) ReadMember(dataset, member string) ([]byte, error) {
 	dsn := strings.Trim(dataset, "'")
-	if err := validateDSN(dsn); err != nil {
+	if err := validate.DSN(dsn); err != nil {
 		return nil, err
 	}
-	if err := validateDSN(member); err != nil {
+	if err := validate.DSN(member); err != nil {
 		return nil, err
 	}
 
@@ -442,6 +418,9 @@ func (s *SSHConnection) ListJobs(owner string) ([]JobStatus, error) {
 	if owner == "" {
 		owner = s.user
 	}
+	if err := validate.Owner(owner); err != nil {
+		return nil, err
+	}
 
 	out, err := s.exec(`tsocmd "STATUS" 2>/dev/null`)
 	if err != nil {
@@ -452,7 +431,7 @@ func (s *SSHConnection) ListJobs(owner string) ([]JobStatus, error) {
 }
 
 func (s *SSHConnection) GetJobStatus(jobid string) (*JobStatus, error) {
-	if err := validateDSN(jobid); err != nil {
+	if err := validate.DSN(jobid); err != nil {
 		return nil, err
 	}
 
@@ -473,7 +452,7 @@ func (s *SSHConnection) GetJobStatus(jobid string) (*JobStatus, error) {
 }
 
 func (s *SSHConnection) GetJobOutput(jobid string) ([]byte, error) {
-	if err := validateDSN(jobid); err != nil {
+	if err := validate.DSN(jobid); err != nil {
 		return nil, err
 	}
 
@@ -485,7 +464,7 @@ func (s *SSHConnection) GetJobOutput(jobid string) ([]byte, error) {
 }
 
 func (s *SSHConnection) CancelJob(jobid string) error {
-	if err := validateDSN(jobid); err != nil {
+	if err := validate.DSN(jobid); err != nil {
 		return err
 	}
 
@@ -497,7 +476,7 @@ func (s *SSHConnection) CancelJob(jobid string) error {
 }
 
 func (s *SSHConnection) PurgeJob(jobid string) error {
-	if err := validateDSN(jobid); err != nil {
+	if err := validate.DSN(jobid); err != nil {
 		return err
 	}
 
@@ -514,10 +493,10 @@ func shellEscape(s string) string {
 
 func (s *SSHConnection) GrepMember(dataset, member, pattern string, caseInsensitive bool) ([]byte, error) {
 	dsn := strings.Trim(dataset, "'")
-	if err := validateDSN(dsn); err != nil {
+	if err := validate.DSN(dsn); err != nil {
 		return nil, err
 	}
-	if err := validateDSN(member); err != nil {
+	if err := validate.DSN(member); err != nil {
 		return nil, err
 	}
 

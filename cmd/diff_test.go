@@ -37,7 +37,7 @@ func TestResolveSourceLocalRelative(t *testing.T) {
 }
 
 func TestResolveSourceDSNNoConn(t *testing.T) {
-	_, err := resolveSource(nil, "FALZONE.SOURCE(PROG1)")
+	_, err := resolveSource(nil, "USER.SOURCE(PROG1)")
 	if err == nil {
 		t.Error("expected error for DSN without connection")
 	}
@@ -77,9 +77,9 @@ func TestIsLocalFile(t *testing.T) {
 	}{
 		{"relative dot", "./foo.txt", true},
 		{"relative dotdot", "../bar.txt", true},
-		{"dsn", "FALZONE.SOURCE(PROG1)", false},
+		{"dsn", "USER.SOURCE(PROG1)", false},
 		{"existing file", path, true},
-		{"nonexistent", "/u/falzone/nofile", false},
+		{"nonexistent", "/u/user/nofile", false},
 	}
 
 	for _, tt := range tests {

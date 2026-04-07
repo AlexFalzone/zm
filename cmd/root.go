@@ -75,7 +75,7 @@ func openConnection() (*config.Profile, connection.Connection, error) {
 		Protocol:      profile.Protocol,
 		KeyPath:       profile.KeyPath,
 		Encoding:      profile.Encoding,
-		TLSVerify:     profile.TLSVerify,
+		TLSSkipVerify: profile.TLSSkipVerify,
 		CACertPath:    profile.CACertPath,
 		RetryAttempts: profile.RetryAttempts,
 		RetryDelay:    profile.RetryDelay,

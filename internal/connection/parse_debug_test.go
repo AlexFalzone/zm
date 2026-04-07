@@ -129,8 +129,8 @@ func TestParseUSSListFromDebugRealOutput(t *testing.T) {
 	debug := `> LIST -a
 < 125 List started
 total 48
-drwxr-xr-x   2 FALZONE  SYS1        8192 Mar 12 10:20 src
--rw-r--r--   1 FALZONE  SYS1        1884 Mar 12 10:16 Makefile
+drwxr-xr-x   2 USER  SYS1        8192 Mar 12 10:20 src
+-rw-r--r--   1 USER  SYS1        1884 Mar 12 10:16 Makefile
 < 250 List completed
 `
 	files, err := parseUSSListFromDebug(debug)

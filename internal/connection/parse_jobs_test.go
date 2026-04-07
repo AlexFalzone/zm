@@ -12,11 +12,11 @@ func TestParseJobLine(t *testing.T) {
 	}{
 		{
 			name: "output with RC",
-			line: "MYJOB    JOB12345 FALZONE  OUTPUT A    RC=0000",
+			line: "MYJOB    JOB12345 USER  OUTPUT A    RC=0000",
 			expected: JobStatus{
 				JobName: "MYJOB",
 				JobID:   "JOB12345",
-				Owner:   "FALZONE",
+				Owner:   "USER",
 				Status:  "OUTPUT",
 				Class:   "A",
 				RetCode: "CC 0000",
@@ -93,17 +93,17 @@ func TestParseStatusOutput(t *testing.T) {
 		{
 			name:   "output queue",
 			output: "JOB MYJOB(JOB12345) ON OUTPUT QUEUE\n",
-			owner:  "FALZONE",
+			owner:  "USER",
 			want: []JobStatus{
-				{JobID: "JOB12345", JobName: "MYJOB", Owner: "FALZONE", Status: "OUTPUT"},
+				{JobID: "JOB12345", JobName: "MYJOB", Owner: "USER", Status: "OUTPUT"},
 			},
 		},
 		{
 			name:   "executing",
 			output: "JOB TESTJOB(JOB00001) EXECUTING\n",
-			owner:  "FALZONE",
+			owner:  "USER",
 			want: []JobStatus{
-				{JobID: "JOB00001", JobName: "TESTJOB", Owner: "FALZONE", Status: "ACTIVE"},
+				{JobID: "JOB00001", JobName: "TESTJOB", Owner: "USER", Status: "ACTIVE"},
 			},
 		},
 		{
@@ -121,15 +121,15 @@ READY`,
 		{
 			name:   "no jobs",
 			output: "READY\nEND\n",
-			owner:  "FALZONE",
+			owner:  "USER",
 			want:   nil,
 		},
 		{
 			name:   "input queue",
 			output: "JOB WAIT(JOB99999) ON INPUT QUEUE\n",
-			owner:  "FALZONE",
+			owner:  "USER",
 			want: []JobStatus{
-				{JobID: "JOB99999", JobName: "WAIT", Owner: "FALZONE", Status: "INPUT"},
+				{JobID: "JOB99999", JobName: "WAIT", Owner: "USER", Status: "INPUT"},
 			},
 		},
 	}

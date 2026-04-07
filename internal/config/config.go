@@ -23,11 +23,11 @@ type Profile struct {
 	KeyPath       string        `yaml:"key_path,omitempty"`
 	HLQ           string        `yaml:"hlq"`
 	USSHome       string        `yaml:"uss_home"`
-	Encoding      string        `yaml:"encoding,omitempty"`       // "ascii", "ebcdic", "" (auto-detect)
-	TLSVerify     bool          `yaml:"tls_verify,omitempty"`     // verify TLS certificates (default false)
-	CACertPath    string        `yaml:"ca_cert_path,omitempty"`   // path to CA cert for TLS verification
-	RetryAttempts int           `yaml:"retry_attempts,omitempty"` // number of retry attempts (0 = no retry)
-	RetryDelay    time.Duration `yaml:"retry_delay,omitempty"`    // initial delay between retries (default 1s)
+	Encoding      string        `yaml:"encoding,omitempty"`        // "ascii", "ebcdic", "" (auto-detect)
+	TLSSkipVerify bool          `yaml:"tls_skip_verify,omitempty"` // skip TLS certificate verification (default false = verify ON)
+	CACertPath    string        `yaml:"ca_cert_path,omitempty"`    // path to CA cert for TLS verification
+	RetryAttempts int           `yaml:"retry_attempts,omitempty"`  // number of retry attempts (0 = no retry)
+	RetryDelay    time.Duration `yaml:"retry_delay,omitempty"`     // initial delay between retries (default 1s)
 }
 
 type Config struct {

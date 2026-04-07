@@ -9,7 +9,7 @@ func TestParseZOSMFJobs(t *testing.T) {
 		{
 			JobID:   "JOB12345",
 			JobName: "MYJOB",
-			Owner:   "FALZONE",
+			Owner:   "USER",
 			Status:  "OUTPUT",
 			RetCode: "CC 0000",
 			Class:   "A",
@@ -17,7 +17,7 @@ func TestParseZOSMFJobs(t *testing.T) {
 		{
 			JobID:   "JOB12346",
 			JobName: "MYJOB2",
-			Owner:   "FALZONE",
+			Owner:   "USER",
 			Status:  "ACTIVE",
 			RetCode: "",
 			Class:   "B",

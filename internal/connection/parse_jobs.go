@@ -4,7 +4,7 @@ import "strings"
 
 func parseJobLine(line string) JobStatus {
 	// Format: JOBNAME  JOBID    OWNER    STATUS CLASS
-	// Example: MYJOB    JOB12345 FALZONE  OUTPUT A    RC=0000
+	// Example: MYJOB    JOB12345 USER  OUTPUT A    RC=0000
 	fields := strings.Fields(line)
 	if len(fields) < 4 {
 		return JobStatus{}

@@ -2,6 +2,8 @@ package connection
 
 import (
 	"testing"
+
+	"zm/internal/validate"
 )
 
 func TestParseListDatasetsOutput(t *testing.T) {
@@ -13,20 +15,20 @@ func TestParseListDatasetsOutput(t *testing.T) {
 		{
 			name: "standard LISTDS output",
 			output: `READY
-FALZONE.JCL
-FALZONE.SOURCE
-FALZONE.LOAD
+USER.JCL
+USER.SOURCE
+USER.LOAD
 READY
 END`,
-			want: []string{"FALZONE.JCL", "FALZONE.SOURCE", "FALZONE.LOAD"},
+			want: []string{"USER.JCL", "USER.SOURCE", "USER.LOAD"},
 		},
 		{
 			name: "LISTCAT output",
 			output: `THE FOLLOWING WAS FOUND
-FALZONE.TEST.DATA
-FALZONE.TEST.JCL
+USER.TEST.DATA
+USER.TEST.JCL
 READY`,
-			want: []string{"FALZONE.TEST.DATA", "FALZONE.TEST.JCL"},
+			want: []string{"USER.TEST.DATA", "USER.TEST.JCL"},
 		},
 		{
 			name:   "empty output",
@@ -35,11 +37,11 @@ READY`,
 		},
 		{
 			name: "with dashes and status lines",
-			output: `LISTDS 'FALZONE.*'
+			output: `LISTDS 'USER.*'
 ---RECFM-LRECL-BLKSIZE
-FALZONE.DATA
+USER.DATA
 READY`,
-			want: []string{"FALZONE.DATA"},
+			want: []string{"USER.DATA"},
 		},
 	}
 
@@ -107,22 +109,22 @@ func TestValidateDSN(t *testing.T) {
 		dsn     string
 		wantErr bool
 	}{
-		{name: "valid simple", dsn: "FALZONE.JCL", wantErr: false},
+		{name: "valid simple", dsn: "USER.JCL", wantErr: false},
 		{name: "valid with special chars", dsn: "SYS1.@MACRO#.$DATA", wantErr: false},
-		{name: "valid with parens", dsn: "FALZONE.SOURCE(MEMBER)", wantErr: false},
-		{name: "valid with wildcard", dsn: "FALZONE.*", wantErr: false},
-		{name: "invalid semicolon", dsn: "FALZONE;rm -rf /", wantErr: true},
-		{name: "invalid pipe", dsn: "FALZONE|cat /etc/passwd", wantErr: true},
-		{name: "invalid backtick", dsn: "FALZONE`id`", wantErr: true},
-		{name: "invalid space", dsn: "FALZONE SOURCE", wantErr: true},
-		{name: "empty", dsn: "", wantErr: false},
+		{name: "valid with parens", dsn: "USER.SOURCE(MEMBER)", wantErr: false},
+		{name: "valid with wildcard", dsn: "USER.*", wantErr: false},
+		{name: "invalid semicolon", dsn: "USER;rm -rf /", wantErr: true},
+		{name: "invalid pipe", dsn: "USER|cat /etc/passwd", wantErr: true},
+		{name: "invalid backtick", dsn: "USER`id`", wantErr: true},
+		{name: "invalid space", dsn: "USER SOURCE", wantErr: true},
+		{name: "empty", dsn: "", wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateDSN(tt.dsn)
+			err := validate.DSN(tt.dsn)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateDSN(%q) error = %v, wantErr %v", tt.dsn, err, tt.wantErr)
+				t.Errorf("validate.DSN(%q) error = %v, wantErr %v", tt.dsn, err, tt.wantErr)
 			}
 		})
 	}
@@ -134,22 +136,22 @@ func TestValidateUSSPath(t *testing.T) {
 		path    string
 		wantErr bool
 	}{
-		{name: "valid path", path: "/u/falzone/.bashrc", wantErr: false},
-		{name: "valid with subdirs", path: "/u/falzone/src/main.c", wantErr: false},
-		{name: "invalid semicolon", path: "/u/falzone; rm -rf /", wantErr: true},
+		{name: "valid path", path: "/u/user/.bashrc", wantErr: false},
+		{name: "valid with subdirs", path: "/u/user/src/main.c", wantErr: false},
+		{name: "invalid semicolon", path: "/u/user; rm -rf /", wantErr: true},
 		{name: "invalid command sub", path: "/u/$(whoami)/file", wantErr: true},
 		{name: "invalid backtick", path: "/u/`id`/file", wantErr: true},
-		{name: "invalid pipe", path: "/u/falzone | cat", wantErr: true},
-		{name: "invalid ampersand", path: "/u/falzone & echo", wantErr: true},
-		{name: "invalid redirect", path: "/u/falzone > /tmp/out", wantErr: true},
-		{name: "empty", path: "", wantErr: false},
+		{name: "invalid pipe", path: "/u/user | cat", wantErr: true},
+		{name: "invalid ampersand", path: "/u/user & echo", wantErr: true},
+		{name: "invalid redirect", path: "/u/user > /tmp/out", wantErr: true},
+		{name: "empty", path: "", wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateUSSPath(tt.path)
+			err := validate.USSPath(tt.path)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateUSSPath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
+				t.Errorf("validate.USSPath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
 			}
 		})
 	}
@@ -160,7 +162,7 @@ func TestIsDatasetName(t *testing.T) {
 		input string
 		want  bool
 	}{
-		{"FALZONE.JCL", true},
+		{"USER.JCL", true},
 		{"SYS1.MACLIB", true},
 		{"A.B.C.D", true},
 		{"DATA@SET#1.$X", true},

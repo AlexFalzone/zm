@@ -113,7 +113,7 @@ func runGrep(cmd *cobra.Command, args []string) error {
 		return grepUSS(cmd, conn, target, pattern, matcher, w)
 	}
 
-	// Wildcard dataset pattern (e.g. FALZONE.*) → resolve datasets first
+	// Wildcard dataset pattern (e.g. USER.*) → resolve datasets first
 	if strings.Contains(target, "*") {
 		return grepDatasetPattern(cmd, conn, target, pattern, matcher, &totalMatches, w)
 	}
@@ -331,7 +331,10 @@ func parseGrepOutput(output, member string) []grepMatch {
 		if colonIdx == -1 {
 			continue
 		}
-		lineNum, _ := strconv.Atoi(line[:colonIdx])
+		lineNum, err := strconv.Atoi(line[:colonIdx])
+		if err != nil {
+			continue
+		}
 		matches = append(matches, grepMatch{
 			Member: member,
 			Line:   lineNum,

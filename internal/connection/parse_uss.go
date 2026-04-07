@@ -6,8 +6,8 @@ import (
 )
 
 // parseUSSLine parses a Unix-style listing line:
-// drwxr-xr-x   2 FALZONE  SYS1        8192 Mar 12 10:20 analyzer
-// -rw-r--r--   1 FALZONE  SYS1        1884 Mar 12 10:16 Makefile
+// drwxr-xr-x   2 USER  SYS1        8192 Mar 12 10:20 analyzer
+// -rw-r--r--   1 USER  SYS1        1884 Mar 12 10:16 Makefile
 func parseUSSLine(line string) USSFile {
 	fields := strings.Fields(line)
 	if len(fields) < 9 {

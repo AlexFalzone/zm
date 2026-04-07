@@ -13,7 +13,7 @@ type ConnectionOptions struct {
 	Protocol      string
 	KeyPath       string
 	Encoding      string
-	TLSVerify     bool
+	TLSSkipVerify bool
 	CACertPath    string
 	RetryAttempts int
 	RetryDelay    time.Duration
@@ -23,7 +23,7 @@ func NewConnection(opts ConnectionOptions) (Connection, error) {
 	switch opts.Protocol {
 	case "zosmf":
 		z := NewZOSMFConnection(opts.Host, opts.Port, opts.User, opts.Password, opts.Encoding)
-		z.tlsVerify = opts.TLSVerify
+		z.tlsSkipVerify = opts.TLSSkipVerify
 		z.caCertPath = opts.CACertPath
 		z.retryAttempts = opts.RetryAttempts
 		z.retryDelay = opts.RetryDelay

@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	submitWait   bool
-	submitOutput bool
+	submitWait    bool
+	submitOutput  bool
+	submitTimeout time.Duration
 )
 
 var submitCmd = &cobra.Command{
@@ -28,6 +29,7 @@ func init() {
 	rootCmd.AddCommand(submitCmd)
 	submitCmd.Flags().BoolVarP(&submitWait, "wait", "w", false, "wait for job to complete")
 	submitCmd.Flags().BoolVarP(&submitOutput, "output", "o", false, "show output on completion (implies --wait)")
+	submitCmd.Flags().DurationVar(&submitTimeout, "timeout", 15*time.Minute, "maximum time to wait for job completion")
 }
 
 func runSubmit(cmd *cobra.Command, args []string) error {
@@ -87,7 +89,7 @@ func runSubmit(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if err := waitForJob(conn, jobid); err != nil {
+	if err := waitForJob(conn, jobid, submitTimeout); err != nil {
 		return err
 	}
 
@@ -102,11 +104,17 @@ func runSubmit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func waitForJob(conn connection.Connection, jobid string) error {
+func waitForJob(conn connection.Connection, jobid string, timeout time.Duration) error {
 	fmt.Printf("Waiting for %s...", jobid)
 	delay := time.Second
+	deadline := time.Now().Add(timeout)
 
 	for {
+		if time.Now().After(deadline) {
+			fmt.Println()
+			return fmt.Errorf("timed out waiting for job %s after %s", jobid, timeout)
+		}
+
 		status, err := conn.GetJobStatus(jobid)
 		if err != nil {
 			fmt.Println()

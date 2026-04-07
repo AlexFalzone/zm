@@ -73,8 +73,10 @@ func runDiff(cmd *cobra.Command, args []string) error {
 }
 
 func readDiffSources(conn connection.Connection, source1, source2 string) (string, string, error) {
-	var contentA, contentB string
-	var errA, errB error
+	type result struct {
+		content string
+		err     error
+	}
 
 	localA := isLocalFile(source1)
 	localB := isLocalFile(source2)
@@ -82,27 +84,33 @@ func readDiffSources(conn connection.Connection, source1, source2 string) (strin
 	canParallel := (localA || localB) || (isConcurrent && !localA && !localB)
 
 	if canParallel {
+		results := make([]result, 2)
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			contentA, errA = resolveSource(conn, source1)
+			results[0].content, results[0].err = resolveSource(conn, source1)
 		}()
 		go func() {
 			defer wg.Done()
-			contentB, errB = resolveSource(conn, source2)
+			results[1].content, results[1].err = resolveSource(conn, source2)
 		}()
 		wg.Wait()
-	} else {
-		contentA, errA = resolveSource(conn, source1)
-		if errA == nil {
-			contentB, errB = resolveSource(conn, source2)
+
+		if results[0].err != nil {
+			return "", "", fmt.Errorf("source1: %w", results[0].err)
 		}
+		if results[1].err != nil {
+			return "", "", fmt.Errorf("source2: %w", results[1].err)
+		}
+		return results[0].content, results[1].content, nil
 	}
 
+	contentA, errA := resolveSource(conn, source1)
 	if errA != nil {
 		return "", "", fmt.Errorf("source1: %w", errA)
 	}
+	contentB, errB := resolveSource(conn, source2)
 	if errB != nil {
 		return "", "", fmt.Errorf("source2: %w", errB)
 	}
